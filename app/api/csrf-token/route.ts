@@ -10,8 +10,8 @@ import { withSecurity } from '@/lib/security-middleware';
  * Endpoint to get a CSRF token for authenticated sessions
  */
 async function handler(request: NextRequest) {
-  const existingToken = request.cookies.get('csrf-token')?.value || null;
-  const token = validateCSRFToken(existingToken, existingToken)
+  const existingToken = request.cookies.get('csrf-token')?.value ?? null;
+  const token = existingToken && validateCSRFToken(existingToken, existingToken)
     ? existingToken
     : generateCSRFToken();
   const response = NextResponse.json({ success: true });
