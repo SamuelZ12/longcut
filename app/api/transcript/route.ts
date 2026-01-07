@@ -4,6 +4,15 @@ import { withSecurity, SECURITY_PRESETS } from '@/lib/security-middleware';
 import { shouldUseMockData, getMockTranscript } from '@/lib/mock-data';
 import { mergeTranscriptSegmentsIntoSentences } from '@/lib/transcript-sentence-merger';
 import { NO_CREDITS_USED_MESSAGE } from '@/lib/no-credits-message';
+import { z } from 'zod';
+
+// Strict validation for language code (ISO 639-1)
+// Only allow 2-10 alphanumeric characters and dashes
+const langSchema = z.string()
+  .min(2)
+  .max(10)
+  .regex(/^[a-zA-Z0-9-]+$/)
+  .optional();
 
 function respondWithNoCredits(
   payload: Record<string, unknown>,
@@ -31,6 +40,13 @@ async function handler(request: NextRequest) {
 
     if (!videoId) {
       return respondWithNoCredits({ error: 'Invalid YouTube URL' }, 400);
+    }
+
+    // Validate lang if provided
+    try {
+      langSchema.parse(lang);
+    } catch {
+      return respondWithNoCredits({ error: 'Invalid language code format' }, 400);
     }
 
     if (shouldUseMockData()) {
@@ -210,7 +226,7 @@ async function handler(request: NextRequest) {
     }
 
     const rawSegments = Array.isArray(transcriptSegments)
-      ? transcriptSegments.map((item, idx) => {
+      ? transcriptSegments.map((item) => {
         const transformed = {
           text: item.text || item.content || '',
           // Convert milliseconds to seconds for offset/start

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { withSecurity, SECURITY_PRESETS } from '@/lib/security-middleware';
-import { formatValidationError, noteDeleteSchema, noteInsertSchema } from '@/lib/validation';
+import { formatValidationError, noteDeleteSchema, noteInsertSchema, youtubeIdSchema } from '@/lib/validation';
 import { z } from 'zod';
 
 const getNotesQuerySchema = z.object({
-  youtubeId: z.string()
+  youtubeId: youtubeIdSchema
 });
 
 interface NoteRow {
