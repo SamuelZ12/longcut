@@ -72,14 +72,59 @@ export function availableProviders(): ProviderKey[] {
 
 export function getProvider(key?: string): ProviderAdapter {
   const resolvedKey = resolveProviderKey(key);
+  console.log(`[AI Provider] Using provider: ${resolvedKey}`);
   return ensureProvider(resolvedKey);
+}
+
+function isRetryableError(error: unknown): boolean {
+  if (!error) return false;
+  const message = error instanceof Error ? error.message : String(error);
+  const lowerMessage = message.toLowerCase();
+  return (
+    lowerMessage.includes('service unavailable') ||
+    lowerMessage.includes('503') ||
+    lowerMessage.includes('502') ||
+    lowerMessage.includes('504') ||
+    lowerMessage.includes('timeout') ||
+    lowerMessage.includes('overload')
+  );
+}
+
+function getFallbackProvider(currentKey: ProviderKey): ProviderKey | null {
+  const available = availableProviders();
+  const fallback = available.find((key) => key !== currentKey);
+  return fallback ?? null;
 }
 
 export async function generateStructuredContent(
   params: ProviderGenerateParams & { provider?: string }
 ): Promise<ProviderGenerateResult> {
   const { provider, ...rest } = params;
-  const adapter = getProvider(provider);
-  return adapter.generate(rest);
+  const primaryKey = resolveProviderKey(provider);
+  const primaryAdapter = getProvider(provider);
+
+  try {
+    return await primaryAdapter.generate(rest);
+  } catch (error) {
+    // If the error is retryable and we have a fallback provider, try it
+    if (isRetryableError(error)) {
+      const fallbackKey = getFallbackProvider(primaryKey);
+      if (fallbackKey) {
+        console.warn(
+          `[AI Provider] ${primaryKey} failed with retryable error, trying fallback: ${fallbackKey}`
+        );
+        try {
+          const fallbackAdapter = ensureProvider(fallbackKey);
+          console.log(`[AI Provider] Using fallback provider: ${fallbackKey}`);
+          return await fallbackAdapter.generate(rest);
+        } catch (fallbackError) {
+          console.error(`[AI Provider] Fallback provider ${fallbackKey} also failed:`, fallbackError);
+          // Throw the original error if fallback also fails
+          throw error;
+        }
+      }
+    }
+    throw error;
+  }
 }
 

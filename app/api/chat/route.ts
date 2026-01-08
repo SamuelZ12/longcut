@@ -181,12 +181,48 @@ ${message}
       console.log('=== END RAW RESPONSE ===');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      if (errorMessage.includes('429') || errorMessage.includes('quota')) {
+      console.error('[Chat API] AI generation failed:', error);
+
+      // Rate limit / quota / service unavailable errors
+      if (errorMessage.includes('429') || errorMessage.includes('quota') ||
+          errorMessage.toLowerCase().includes('rate limit') ||
+          errorMessage.toLowerCase().includes('service unavailable') ||
+          errorMessage.includes('503')) {
         return NextResponse.json({
           content: "The AI service is currently at capacity. Please wait a moment and try again.",
           citations: [],
         });
       }
+
+      // API key / authentication errors
+      if (errorMessage.includes('API_KEY') || errorMessage.includes('required') ||
+          errorMessage.includes('401') || errorMessage.toLowerCase().includes('authentication') ||
+          errorMessage.toLowerCase().includes('unauthorized')) {
+        console.error('[Chat API] Authentication/API key issue detected');
+        return NextResponse.json({
+          content: "There's a configuration issue with the AI service. Please try again later.",
+          citations: [],
+        });
+      }
+
+      // Schema conversion errors
+      if (errorMessage.toLowerCase().includes('schema') || errorMessage.includes('convert')) {
+        console.error('[Chat API] Schema conversion issue detected');
+        return NextResponse.json({
+          content: "I had trouble formatting my response. Please try rephrasing your question.",
+          citations: [],
+        });
+      }
+
+      // Timeout errors
+      if (errorMessage.toLowerCase().includes('timeout') || errorMessage.includes('timed out')) {
+        return NextResponse.json({
+          content: "The request took too long. Please try again with a shorter question.",
+          citations: [],
+        });
+      }
+
+      // Generic fallback
       return NextResponse.json({
         content: "I apologize, but I'm having trouble processing your request right now. Please try again in a moment.",
         citations: [],
