@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createServiceRoleClient } from '@/lib/supabase/admin';
 import { withSecurity, SECURITY_PRESETS } from '@/lib/security-middleware';
 import { mapStripeSubscriptionToProfileUpdate } from '@/lib/subscription-manager';
-import { processTopupCheckout } from '@/lib/stripe-topup';
+import { processTopupCheckout, processTranscriptionTopupCheckout } from '@/lib/stripe-topup';
 import type { ProfilesUpdate } from '@/lib/supabase/types';
 
 const requestSchema = z.object({
@@ -59,6 +59,26 @@ async function handler(req: NextRequest) {
         creditsAdded: topupResult.creditsAdded,
         totalCredits: topupResult.totalCredits,
         alreadyApplied: topupResult.alreadyApplied,
+      });
+    }
+
+    // Handle transcription minutes top-up
+    if (session.mode === 'payment' && session.metadata?.priceType === 'transcription_topup') {
+      const result = await processTranscriptionTopupCheckout(session, serviceClient);
+
+      if (!result) {
+        return NextResponse.json(
+          { error: 'Unable to process transcription top-up' },
+          { status: 400 }
+        );
+      }
+
+      return NextResponse.json({
+        updated: !result.alreadyApplied,
+        type: 'transcription_topup',
+        minutesAdded: result.minutesAdded,
+        totalMinutes: result.totalMinutes,
+        alreadyApplied: result.alreadyApplied,
       });
     }
 

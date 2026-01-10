@@ -20,6 +20,9 @@ import { useModePreference } from "@/lib/hooks/use-mode-preference";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { useSubscription } from "@/lib/hooks/use-subscription";
 import { useTranscriptExport } from "@/lib/hooks/use-transcript-export";
+import { useTranscription } from "@/lib/hooks/use-transcription";
+import { TranscriptionPrompt } from "@/components/transcription-prompt";
+import { TranscriptionProgress } from "@/components/transcription-progress";
 
 // Page state for better UX
 type PageState = 'IDLE' | 'ANALYZING_NEW' | 'LOADING_CACHED';
@@ -263,6 +266,14 @@ export default function AnalyzePage() {
   // Cached suggested questions
   const [cachedSuggestedQuestions, setCachedSuggestedQuestions] = useState<string[] | null>(null);
 
+  // AI Transcription state
+  const [showTranscriptionPrompt, setShowTranscriptionPrompt] = useState(false);
+  const [transcriptionPromptScenario, setTranscriptionPromptScenario] = useState<"no-captions" | "user-choice" | "credits-exhausted" | "not-pro">("no-captions");
+  const [transcriptionJobId, setTranscriptionJobId] = useState<string | null>(null);
+  const [showTranscriptionProgress, setShowTranscriptionProgress] = useState(false);
+  const [pendingTranscriptionVideoId, setPendingTranscriptionVideoId] = useState<string | null>(null);
+  const [transcriptionIsLoading, setTranscriptionIsLoading] = useState(false);
+
   // Use custom hooks for translation
   const {
     selectedLanguage,
@@ -347,6 +358,14 @@ export default function AnalyzePage() {
     user,
     onAuthRequired: handleAuthRequired,
   });
+
+  // Use custom hook for AI transcription
+  const {
+    usage: transcriptionUsage,
+    fetchUsage: fetchTranscriptionUsage,
+    startTranscription,
+    cancelTranscription,
+  } = useTranscription();
 
   // Ensure we fetch subscription status early so Pro users aren't blocked
   useEffect(() => {
@@ -988,6 +1007,85 @@ export default function AnalyzePage() {
       // Process transcript response (required)
       if (!transcriptRes || !transcriptRes.ok) {
         const errorData = transcriptRes ? await transcriptRes.json().catch(() => ({ error: "Unknown error" })) : { error: "Failed to fetch transcript" };
+
+        // Check if this is a "no captions" scenario - offer AI transcription for Pro users
+        const isNoCaptions = transcriptRes?.status === 404 ||
+          (typeof errorData.error === 'string' &&
+            (errorData.error.toLowerCase().includes('no transcript') ||
+             errorData.error.toLowerCase().includes('no captions') ||
+             errorData.error.toLowerCase().includes('not have subtitles')));
+
+        if (isNoCaptions) {
+          // We need video info to get duration for AI transcription
+          let fetchedVideoInfoForTranscription: VideoInfo | null = null;
+          if (videoInfoRes && videoInfoRes.ok) {
+            try {
+              const videoInfoData = await videoInfoRes.json();
+              if (videoInfoData && !videoInfoData.error) {
+                fetchedVideoInfoForTranscription = videoInfoData;
+                setVideoInfo(videoInfoData);
+                const rawDuration = videoInfoData?.duration;
+                const numericDuration =
+                  typeof rawDuration === "number"
+                    ? rawDuration
+                    : typeof rawDuration === "string"
+                      ? Number(rawDuration)
+                      : null;
+                if (numericDuration && !Number.isNaN(numericDuration) && numericDuration > 0) {
+                  setVideoDuration(numericDuration);
+                }
+              }
+            } catch (error) {
+              console.error("Failed to parse video info:", error);
+            }
+          }
+
+          // Check if user is authenticated and has Pro subscription
+          if (!user) {
+            // Not authenticated - show "not pro" prompt which will prompt to upgrade
+            setPendingTranscriptionVideoId(extractedVideoId);
+            setTranscriptionPromptScenario("not-pro");
+            setShowTranscriptionPrompt(true);
+            setPageState('IDLE');
+            setLoadingStage(null);
+            return;
+          }
+
+          // Check subscription status
+          const subStatus = subscriptionStatus?.tier;
+          if (subStatus !== 'pro') {
+            setPendingTranscriptionVideoId(extractedVideoId);
+            setTranscriptionPromptScenario("not-pro");
+            setShowTranscriptionPrompt(true);
+            setPageState('IDLE');
+            setLoadingStage(null);
+            return;
+          }
+
+          // User is Pro - fetch transcription usage and show prompt
+          const usageData = await fetchTranscriptionUsage();
+          const videoDurationMinutes = fetchedVideoInfoForTranscription?.duration
+            ? Math.ceil(Number(fetchedVideoInfoForTranscription.duration) / 60)
+            : 60; // Default estimate
+
+          if (usageData && usageData.totalRemaining < videoDurationMinutes) {
+            setPendingTranscriptionVideoId(extractedVideoId);
+            setTranscriptionPromptScenario("credits-exhausted");
+            setShowTranscriptionPrompt(true);
+            setPageState('IDLE');
+            setLoadingStage(null);
+            return;
+          }
+
+          // Has enough credits - show the transcription prompt
+          setPendingTranscriptionVideoId(extractedVideoId);
+          setTranscriptionPromptScenario("no-captions");
+          setShowTranscriptionPrompt(true);
+          setPageState('IDLE');
+          setLoadingStage(null);
+          return;
+        }
+
         const message = buildApiErrorMessage(errorData, "Failed to fetch transcript");
         throw new Error(message);
       }
@@ -1355,7 +1453,9 @@ export default function AnalyzePage() {
     checkRateLimit,
     user,
     checkGenerationLimit,
-    redirectToAuthForLimit
+    redirectToAuthForLimit,
+    subscriptionStatus,
+    fetchTranscriptionUsage
   ]);
 
   useEffect(() => {
@@ -1789,6 +1889,142 @@ export default function AnalyzePage() {
     setEditingNote(null);
   }, []);
 
+  // AI Transcription handlers
+  const handleStartTranscription = useCallback(async () => {
+    if (!pendingTranscriptionVideoId || !videoDuration) return;
+
+    setTranscriptionIsLoading(true);
+    try {
+      const result = await startTranscription(pendingTranscriptionVideoId, videoDuration);
+      if (result?.jobId) {
+        setTranscriptionJobId(result.jobId);
+        setShowTranscriptionPrompt(false);
+        setShowTranscriptionProgress(true);
+      }
+    } catch (err) {
+      console.error('Failed to start transcription:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to start transcription');
+    } finally {
+      setTranscriptionIsLoading(false);
+    }
+  }, [pendingTranscriptionVideoId, videoDuration, startTranscription]);
+
+  const handleTranscriptionComplete = useCallback((transcriptData: TranscriptSegment[]) => {
+    setShowTranscriptionProgress(false);
+    setTranscriptionJobId(null);
+
+    if (transcriptData && transcriptData.length > 0) {
+      // Set the AI-generated transcript and continue with video analysis
+      const normalizedTranscriptData = normalizeTranscript(transcriptData);
+      setTranscript(normalizedTranscriptData);
+
+      // Trigger the rest of the analysis pipeline with the new transcript
+      if (pendingTranscriptionVideoId) {
+        // Re-run the topic generation with the AI transcript
+        setPageState('ANALYZING_NEW');
+        setLoadingStage('generating');
+        setGenerationStartTime(Date.now());
+
+        backgroundOperation(
+          'generate-topics-with-ai-transcript',
+          async () => {
+            const topicsController = abortManager.current.createController('topics');
+            const takeawaysController = abortManager.current.createController('takeaways', 60000);
+
+            const topicsPromise = fetch("/api/video-analysis", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                videoId: pendingTranscriptionVideoId,
+                videoInfo,
+                transcript: normalizedTranscriptData,
+                mode,
+                forceRegenerate: true
+              }),
+              signal: topicsController.signal,
+            });
+
+            const takeawaysPromise = fetch("/api/generate-summary", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                transcript: normalizedTranscriptData,
+                videoInfo,
+                videoId: pendingTranscriptionVideoId,
+                targetLanguage: videoInfo?.language
+              }),
+              signal: takeawaysController.signal,
+            });
+
+            setShowChatTab(true);
+            setIsGeneratingTakeaways(true);
+
+            const [topicsRes, takeawaysRes] = await Promise.all([topicsPromise, takeawaysPromise]);
+
+            if (!topicsRes.ok) {
+              const errorData = await topicsRes.json().catch(() => ({ error: "Unknown error" }));
+              throw new Error(errorData.error || 'Failed to generate topics');
+            }
+
+            const topicsData = await topicsRes.json();
+            const rawTopics = Array.isArray(topicsData.topics) ? topicsData.topics : [];
+            const generatedTopics = hydrateTopicsWithTranscript(rawTopics, normalizedTranscriptData);
+
+            setTopics(generatedTopics);
+            setBaseTopics(generatedTopics);
+            setSelectedTopic(generatedTopics.length > 0 ? generatedTopics[0] : null);
+
+            if (Array.isArray(topicsData.themes)) {
+              setThemes(topicsData.themes);
+            }
+
+            // Process takeaways
+            if (takeawaysRes.ok) {
+              const summaryData = await takeawaysRes.json();
+              setTakeawaysContent(summaryData.summaryContent);
+            }
+
+            setIsGeneratingTakeaways(false);
+            setPageState('IDLE');
+            setLoadingStage(null);
+            setGenerationStartTime(null);
+            setProcessingStartTime(null);
+            setPendingTranscriptionVideoId(null);
+
+            toast.success('AI transcript generated successfully!');
+          },
+          (error) => {
+            console.error('Failed to generate topics with AI transcript:', error);
+            setError(error.message || 'Failed to analyze video with AI transcript');
+            setPageState('IDLE');
+            setLoadingStage(null);
+            setIsGeneratingTakeaways(false);
+          }
+        );
+      }
+    }
+  }, [pendingTranscriptionVideoId, videoInfo, mode]);
+
+  const handleTranscriptionCancel = useCallback(() => {
+    if (transcriptionJobId) {
+      cancelTranscription(transcriptionJobId);
+    }
+    setShowTranscriptionProgress(false);
+    setTranscriptionJobId(null);
+  }, [transcriptionJobId, cancelTranscription]);
+
+  const handleTranscriptionError = useCallback((errorMessage: string) => {
+    console.error('Transcription error:', errorMessage);
+    toast.error(errorMessage);
+    setShowTranscriptionProgress(false);
+    setTranscriptionJobId(null);
+  }, []);
+
+  const handleUpgradeForTranscription = useCallback(() => {
+    setShowTranscriptionPrompt(false);
+    router.push('/pricing');
+  }, [router]);
+
   return (
     <div className="min-h-screen bg-white pt-12 pb-2">
       {pageState === 'IDLE' && !videoId && !routeVideoId && !urlParam && (
@@ -2080,6 +2316,27 @@ export default function AnalyzePage() {
         onOpenChange={setShowExportUpsell}
         onUpgradeClick={handleUpgradeClick}
       />
+      <TranscriptionPrompt
+        open={showTranscriptionPrompt}
+        onOpenChange={setShowTranscriptionPrompt}
+        onGenerate={handleStartTranscription}
+        onUpgrade={handleUpgradeForTranscription}
+        scenario={transcriptionPromptScenario}
+        isLoading={transcriptionIsLoading}
+        usage={transcriptionUsage ?? undefined}
+        videoDurationMinutes={Math.ceil(videoDuration / 60)}
+        estimatedWaitSeconds={Math.ceil(videoDuration * 0.5)}
+      />
+      {transcriptionJobId && (
+        <TranscriptionProgress
+          open={showTranscriptionProgress}
+          onOpenChange={setShowTranscriptionProgress}
+          jobId={transcriptionJobId}
+          onComplete={handleTranscriptionComplete}
+          onCancel={handleTranscriptionCancel}
+          onError={handleTranscriptionError}
+        />
+      )}
     </div>
   );
 }

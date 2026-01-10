@@ -52,6 +52,9 @@ export const STRIPE_PRICE_IDS = {
 
   /** Top-Up credits: ¥20 one-time for +20 video credits (CNY) - Optional for WeChat Pay */
   TOPUP_CREDITS_CNY: process.env.STRIPE_TOPUP_PRICE_ID_CNY,
+
+  /** Transcription Top-Up: $2.99 one-time for +120 transcription minutes (USD) */
+  TRANSCRIPTION_TOPUP: process.env.STRIPE_TRANSCRIPTION_TOPUP_PRICE_ID,
 } as const;
 
 /**

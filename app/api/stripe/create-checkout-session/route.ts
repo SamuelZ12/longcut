@@ -14,7 +14,7 @@ import { resolveAppUrl } from '@/lib/utils';
  * Request schema for creating a checkout session
  */
 const createCheckoutSessionSchema = z.object({
-  priceType: z.enum(['subscription', 'subscription_annual', 'topup']),
+  priceType: z.enum(['subscription', 'subscription_annual', 'topup', 'transcription_topup']),
   currency: z.enum(['usd', 'cny']).optional().default('usd'), // Optional currency selection for top-ups
 });
 
@@ -121,6 +121,9 @@ async function handler(req: NextRequest) {
         } else {
           priceId = STRIPE_PRICE_IDS.TOPUP_CREDITS;
         }
+        break;
+      case 'transcription_topup':
+        priceId = STRIPE_PRICE_IDS.TRANSCRIPTION_TOPUP;
         break;
     }
 

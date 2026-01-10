@@ -4,7 +4,7 @@ import Stripe from 'stripe';
 import { getStripeClient } from '@/lib/stripe-client';
 import { createServiceRoleClient } from '@/lib/supabase/admin';
 import { mapStripeSubscriptionToProfileUpdate } from '@/lib/subscription-manager';
-import { processTopupCheckout } from '@/lib/stripe-topup';
+import { processTopupCheckout, processTranscriptionTopupCheckout } from '@/lib/stripe-topup';
 import { AuditLogger, AuditAction } from '@/lib/audit-logger';
 import type { ProfilesUpdate } from '@/lib/supabase/types';
 
@@ -172,6 +172,7 @@ async function handleCheckoutCompleted(
   }
 
   if (session.mode === 'payment') {
+    // Handle video credit top-ups
     const topupResult = await processTopupCheckout(session, supabase);
 
     if (topupResult) {
@@ -190,6 +191,32 @@ async function handleCheckoutCompleted(
               ? session.payment_intent
               : session.payment_intent?.id ?? 'unknown',
           details: { credits: topupResult.creditsAdded, totalCredits: topupResult.totalCredits },
+        }, supabase);
+      }
+    }
+
+    // Handle transcription minutes top-ups
+    const transcriptionTopupResult = await processTranscriptionTopupCheckout(session, supabase);
+
+    if (transcriptionTopupResult) {
+      if (transcriptionTopupResult.alreadyApplied) {
+        console.log('ℹ️ Transcription minutes already applied for this payment intent, skipping duplicate log.');
+      } else {
+        console.log(
+          `✅ Successfully added ${transcriptionTopupResult.minutesAdded} transcription minutes for user ${userId}`
+        );
+        await AuditLogger.log({
+          userId,
+          action: AuditAction.TOPUP_PURCHASED,
+          resourceType: 'transcription_topup',
+          resourceId:
+            typeof session.payment_intent === 'string'
+              ? session.payment_intent
+              : session.payment_intent?.id ?? 'unknown',
+          details: {
+            minutes: transcriptionTopupResult.minutesAdded,
+            totalMinutes: transcriptionTopupResult.totalMinutes,
+          },
         }, supabase);
       }
     }
