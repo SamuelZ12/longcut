@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Loader2, ArrowUp, Link, Sparkles } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Loader2, ArrowUp, Link, Sparkles, X } from "lucide-react";
 import { extractVideoId } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ export function UrlInput({
   const [error, setError] = useState("");
   const [isFocused, setIsFocused] = useState(false);
   const [isValidUrl, setIsValidUrl] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const forceSmartMode = isGrokProviderOnClient();
   const showModeSelector =
     !forceSmartMode && typeof onModeChange === "function";
@@ -68,6 +69,13 @@ export function UrlInput({
     onSubmit(url);
   };
 
+  const handleClear = () => {
+    setUrl("");
+    setIsValidUrl(false);
+    setError("");
+    inputRef.current?.focus();
+  };
+
   return (
     <form onSubmit={handleSubmit} className="w-full max-w-[615px]">
       <div className="flex flex-col gap-2">
@@ -84,6 +92,7 @@ export function UrlInput({
               <Link className="h-5 w-5 text-[#989999]" strokeWidth={1.8} />
             </div>
             <input
+              ref={inputRef}
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
@@ -96,6 +105,16 @@ export function UrlInput({
               className="flex-1 border-0 bg-transparent text-[14px] text-[#989999] placeholder:text-[#989999] focus:outline-none"
               disabled={isLoading}
             />
+            {url && !isLoading && (
+              <button
+                type="button"
+                onClick={handleClear}
+                aria-label="Clear input"
+                className="flex h-5 w-5 items-center justify-center rounded-full text-[#989999] hover:bg-[#f0f1f1] hover:text-[#5c5c5c] focus:outline-none focus:ring-2 focus:ring-[#989999] focus:ring-offset-1"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
 
           {/* Bottom row: Mode selector (left) and actions (right) */}
