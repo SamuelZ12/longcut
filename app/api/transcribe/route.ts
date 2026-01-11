@@ -7,7 +7,7 @@ import {
   getActiveTranscriptionJob,
   getCompletedTranscription,
 } from '@/lib/transcription-manager';
-import { estimateCostCents, estimateProcessingTime } from '@/lib/whisper-client';
+import { estimateCostCents, estimateProcessingTime } from '@/lib/gemini-transcription-client';
 
 /**
  * POST /api/transcribe

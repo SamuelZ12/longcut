@@ -7,7 +7,7 @@ import {
   refundTranscriptionMinutes,
 } from '@/lib/transcription-manager';
 import { extractYouTubeAudio, createAudioFile } from '@/lib/cobalt-client';
-import { transcribeAudio } from '@/lib/whisper-client';
+import { transcribeAudio } from '@/lib/gemini-transcription-client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -94,31 +94,32 @@ export async function POST(request: NextRequest) {
       currentStage: 'Transcribing audio with AI',
     }, { client: supabase });
 
-    console.log(`[Transcription] Starting Whisper transcription`);
+    console.log(`[Transcription] Starting Gemini transcription`);
 
-    // Convert to File for Whisper API
+    // Convert to File for Gemini API
     const audioFile = createAudioFile(audioResult);
 
-    // Transcribe with Whisper
+    // Transcribe with Gemini
     let transcriptionResult;
     try {
       transcriptionResult = await transcribeAudio(audioFile, {
         language: undefined, // Auto-detect
-        responseFormat: 'verbose_json',
       }, (progress) => {
         // Update progress during transcription
         const transcriptionProgress = 30 + Math.floor(progress.progress * 0.6); // 30-90%
         updateTranscriptionJobStatus(jobId, {
           progress: transcriptionProgress,
-          currentStage: progress.stage === 'transcribing'
-            ? 'Transcribing audio with AI'
-            : 'Processing transcript',
+          currentStage: progress.stage === 'uploading'
+            ? 'Uploading audio to AI'
+            : progress.stage === 'transcribing'
+              ? 'Transcribing audio with AI'
+              : 'Processing transcript',
         }, { client: supabase }).catch(console.error);
       });
 
-      console.log(`[Transcription] Whisper completed: ${transcriptionResult.segments.length} segments`);
-    } catch (whisperError) {
-      console.error(`[Transcription] Whisper API failed:`, whisperError);
+      console.log(`[Transcription] Gemini completed: ${transcriptionResult.segments.length} segments`);
+    } catch (geminiError) {
+      console.error(`[Transcription] Gemini API failed:`, geminiError);
       await handleJobFailure(jobId, supabase, 'AI transcription failed');
       return NextResponse.json(
         { success: false, error: 'Transcription failed' },
