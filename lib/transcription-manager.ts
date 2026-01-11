@@ -7,10 +7,11 @@
  * - Usage tracking
  */
 
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { getUserSubscriptionStatus, type UserSubscription } from '@/lib/subscription-manager';
 import { formatResetAt } from '@/lib/usage-tracker';
+import { hasUnlimitedVideoAllowance, hasUnlimitedVideoAllowanceById } from '@/lib/access-control';
 
 type DatabaseClient = SupabaseClient<any, string, any>;
 
@@ -78,6 +79,7 @@ export interface TranscriptionDecision {
   willUseTopup?: boolean;
   minutesNeeded?: number;
   existingJobId?: string;
+  unlimited?: boolean;
 }
 
 /**
@@ -206,10 +208,23 @@ export async function canStartTranscription(
   userId: string,
   youtubeId: string,
   estimatedMinutes: number,
-  options?: { client?: DatabaseClient; now?: Date }
+  options?: { client?: DatabaseClient; now?: Date; user?: User }
 ): Promise<TranscriptionDecision> {
   const supabase = options?.client ?? (await createClient());
   const now = options?.now ?? new Date();
+
+  // Check for unlimited access first (bypasses all other checks)
+  if (
+    (options?.user && hasUnlimitedVideoAllowance(options.user)) ||
+    hasUnlimitedVideoAllowanceById(userId)
+  ) {
+    return {
+      allowed: true,
+      reason: 'OK',
+      unlimited: true,
+      minutesNeeded: estimatedMinutes,
+    };
+  }
 
   const subscription = await getUserSubscriptionStatus(userId, { client: supabase });
 
@@ -443,15 +458,24 @@ export async function consumeTranscriptionMinutes(
   userId: string,
   jobId: string,
   minutes: number,
-  options?: { client?: DatabaseClient; now?: Date }
+  options?: { client?: DatabaseClient; now?: Date; user?: User }
 ): Promise<{
   success: boolean;
   error?: string;
   minutesFromSubscription?: number;
   minutesFromTopup?: number;
+  unlimited?: boolean;
 }> {
   const supabase = options?.client ?? (await createClient());
   const now = options?.now ?? new Date();
+
+  // Skip consumption for unlimited users (check both user object and userId)
+  if (
+    (options?.user && hasUnlimitedVideoAllowance(options.user)) ||
+    hasUnlimitedVideoAllowanceById(userId)
+  ) {
+    return { success: true, unlimited: true };
+  }
 
   const subscription = await getUserSubscriptionStatus(userId, { client: supabase });
 

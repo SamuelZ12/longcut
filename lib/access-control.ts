@@ -24,3 +24,20 @@ export function hasUnlimitedVideoAllowance(user: User | null | undefined): boole
   const email = user.email?.toLowerCase();
   return email ? unlimitedVideoUsers.has(email) : false;
 }
+
+/**
+ * Check unlimited access by user ID only (for background processes).
+ * Note: This only checks user ID, not email. If you configured unlimited
+ * users by email only, this won't match them.
+ */
+export function hasUnlimitedVideoAllowanceById(userId: string | null | undefined): boolean {
+  if (!userId) {
+    return false;
+  }
+
+  if (unlimitedVideoUsers.size === 0) {
+    return false;
+  }
+
+  return unlimitedVideoUsers.has(userId.toLowerCase());
+}

@@ -117,7 +117,7 @@ async function handler(request: NextRequest) {
       user.id,
       youtubeId,
       estimatedMinutes,
-      { client: supabase }
+      { client: supabase, user }
     );
 
     if (!decision.allowed) {
