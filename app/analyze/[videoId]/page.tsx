@@ -2025,6 +2025,43 @@ export default function AnalyzePage() {
                   currentSourceLanguage={videoInfo?.language}
                   onRequestExport={handleRequestExport}
                   exportButtonState={exportButtonState}
+                  onTranscriptUpdate={(newTranscript) => {
+                    setTranscript(newTranscript);
+
+                    // Update topics to reflect enhanced text
+                    // Since enhanced transcript changes text length, existing char offsets are invalid.
+                    // We reset offsets to cover the full segments identified by indices.
+                    const updateTopics = (currentTopics: Topic[]) => {
+                      return currentTopics.map(topic => ({
+                        ...topic,
+                        segments: topic.segments.map(seg => {
+                          if (typeof seg.startSegmentIdx === 'number' && typeof seg.endSegmentIdx === 'number') {
+                            const relevantSegments = newTranscript.slice(seg.startSegmentIdx, seg.endSegmentIdx + 1);
+                            if (relevantSegments.length > 0) {
+                              const newText = relevantSegments.map(s => s.text).join(' ');
+                              const lastSegText = relevantSegments[relevantSegments.length - 1].text;
+                              return {
+                                ...seg,
+                                text: newText,
+                                startCharOffset: 0,
+                                endCharOffset: lastSegText.length
+                              };
+                            }
+                          }
+                          return seg;
+                        })
+                      }));
+                    };
+
+                    const updatedTopics = updateTopics(baseTopics);
+                    setTopics(updatedTopics);
+                    setBaseTopics(updatedTopics);
+
+                    // Clear selected topic to avoid rendering issues with stale offsets
+                    if (selectedTopic) {
+                        setSelectedTopic(null);
+                    }
+                  }}
                 />
               </div>
             </div>

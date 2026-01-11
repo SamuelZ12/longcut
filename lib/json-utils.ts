@@ -67,22 +67,28 @@ export function extractJsonPayload(raw: string): string {
     return trimmed;
   }
 
+  // If the string already starts with { or [, it's likely clean JSON - return as-is
+  // This prevents incorrectly extracting inner arrays from objects like {"key":[...]}
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return trimmed;
+  }
+
   // Try to extract content from markdown code fences like ```json ... ```
   const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fencedMatch) {
     return fencedMatch[1].trim();
   }
 
+  // Try to extract JSON object first (more common in structured AI responses)
+  const objectMatch = trimmed.match(/\{[\s\S]*\}/);
+  if (objectMatch) {
+    return objectMatch[0];
+  }
+
   // Try to extract JSON array
   const arrayMatch = trimmed.match(/\[[\s\S]*\]/);
   if (arrayMatch) {
     return arrayMatch[0];
-  }
-
-  // Try to extract JSON object
-  const objectMatch = trimmed.match(/\{[\s\S]*\}/);
-  if (objectMatch) {
-    return objectMatch[0];
   }
 
   return trimmed;

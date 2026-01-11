@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { TranscriptSegment, Topic, Citation, TranslationRequestHandler } from "@/lib/types";
+import { TranscriptSegment, Topic, Citation, TranslationRequestHandler, VideoInfo } from "@/lib/types";
 import { getTopicHSLColor, formatDuration } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Eye, EyeOff, ChevronDown, Download, Loader2, Search, ChevronUp, X } from "lucide-react";
+import { Eye, EyeOff, ChevronDown, Download, Loader2, Search, ChevronUp, X, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { SelectionActions, triggerExplainSelection, SelectionActionPayload } from "@/components/selection-actions";
 import { NoteMetadata } from "@/lib/types";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { csrfFetch } from "@/lib/csrf-client";
 
 interface TranscriptViewerProps {
   transcript: TranscriptSegment[];
@@ -31,6 +33,8 @@ interface TranscriptViewerProps {
     badgeLabel?: string;
     isLoading?: boolean;
   };
+  videoInfo?: VideoInfo | null;
+  onTranscriptUpdate?: (newTranscript: TranscriptSegment[]) => void;
 }
 
 export function TranscriptViewer({
@@ -46,6 +50,8 @@ export function TranscriptViewer({
   onRequestTranslation,
   onRequestExport,
   exportButtonState,
+  videoInfo,
+  onTranscriptUpdate
 }: TranscriptViewerProps) {
   const highlightedRefs = useRef<(HTMLDivElement | null)[]>([]);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -58,6 +64,10 @@ export function TranscriptViewer({
   const [translationsCache, setTranslationsCache] = useState<Map<number, string>>(new Map());
   const [loadingTranslations, setLoadingTranslations] = useState<Set<number>>(new Set());
   const [translationErrors, setTranslationErrors] = useState<Set<number>>(new Set());
+
+  // Enhance Transcript State
+  const [isEnhanceModalOpen, setIsEnhanceModalOpen] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
 
   // Search state
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -119,34 +129,6 @@ export function TranscriptViewer({
   // Clear refs when topic changes
   useEffect(() => {
     highlightedRefs.current = [];
-
-    // Debug: Verify segment indices match content
-    if (selectedTopic && selectedTopic.segments.length > 0 && transcript.length > 0) {
-
-      const firstSeg = selectedTopic.segments[0];
-      if (firstSeg.startSegmentIdx !== undefined && firstSeg.endSegmentIdx !== undefined) {
-
-        // Check what's actually at those indices
-        if (transcript[firstSeg.startSegmentIdx]) {
-
-          // Try to find where the quote actually is
-          const quoteStart = firstSeg.text.substring(0, 30).toLowerCase().replace(/[^a-z0-9 ]/g, '');
-          let foundAt = -1;
-
-          for (let i = Math.max(0, firstSeg.startSegmentIdx - 5); i <= Math.min(firstSeg.startSegmentIdx + 5, transcript.length - 1); i++) {
-            const segText = transcript[i]?.text || '';
-            const segTextNorm = segText.toLowerCase().replace(/[^a-z0-9 ]/g, '');
-            if (segTextNorm.includes(quoteStart)) {
-              foundAt = i;
-              break;
-            }
-          }
-
-          if (foundAt !== -1 && foundAt !== firstSeg.startSegmentIdx) {
-          }
-        }
-      }
-    }
   }, [selectedTopic, transcript]);
 
   // Scroll to citation highlight when it changes
@@ -271,10 +253,7 @@ export function TranscriptViewer({
     }
   }, [isSearchOpen]);
 
-  // Jump to first result when search results change (if user typed something new)
-  // But careful not to jump unexpectedly if just typing more characters of same word?
-  // For now, let's just stick to the first result being selected but maybe not auto-scrolled unless requested.
-  // Actually, standard behavior is usually jump to first match.
+  // Jump to first result when search results change
   useEffect(() => {
       if (searchResults.length > 0 && currentResultIndex === 0) {
           const result = searchResults[0];
@@ -414,8 +393,6 @@ export function TranscriptViewer({
       // Use segment indices with character offsets for precise matching
       if (highlightSeg.startSegmentIdx !== undefined && highlightSeg.endSegmentIdx !== undefined) {
 
-        // Skip this debug logging - removed for cleaner output
-
         // Skip segments that are before the start or after the end
         if (segmentIndex < highlightSeg.startSegmentIdx || segmentIndex > highlightSeg.endSegmentIdx) {
           continue;
@@ -554,13 +531,41 @@ export function TranscriptViewer({
       return; // Do nothing if text is selected
     }
 
-    // Check if the user is dragging (moved mouse significantly between down and up)
-    // Actually, selection check handles this mostly, but if they drag and don't select anything (empty selection)?
-    // The requirement is "dragging to select text". If they drag but select nothing, maybe they still meant to drag?
-    // But usually click implies mousedown and mouseup at same location.
-
     // Seek to the start of the segment
     onTimestampClick(segment.start);
+  };
+
+  const handleEnhance = async () => {
+    if (!videoId) return;
+
+    setIsEnhancing(true);
+    try {
+      const response = await csrfFetch.post('/api/transcript/enhance', {
+        videoId,
+        videoInfo,
+        transcript
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to enhance transcript');
+      }
+
+      const data = await response.json();
+      if (data.transcript && onTranscriptUpdate) {
+        onTranscriptUpdate(data.transcript);
+      }
+      setIsEnhanceModalOpen(false);
+    } catch (error) {
+      console.error('Enhance failed:', error);
+      // Ideally show toast error here, but we don't have toast imported in this component yet (it's in providers)
+      // Since we are in a client component, we could use Sonner's toast if we import it,
+      // but sticking to console for now as per minimal changes unless requested.
+      // Actually, let's keep it simple.
+      alert(error instanceof Error ? error.message : "Failed to enhance transcript");
+    } finally {
+      setIsEnhancing(false);
+    }
   };
 
   return (
@@ -677,6 +682,25 @@ export function TranscriptViewer({
                       <p className="text-xs">Search transcript</p>
                     </TooltipContent>
                   </Tooltip>
+
+                  {/* Enhance Button */}
+                  {videoId && onTranscriptUpdate && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                         <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setIsEnhanceModalOpen(true)}
+                          className="h-6 w-6 p-0 rounded-full hover:bg-slate-200"
+                        >
+                          <Sparkles className="h-3.5 w-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        <p className="text-xs">Enhance Transcript with AI</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
 
                   <Button
                     variant={autoScroll ? "default" : "outline"}
@@ -954,6 +978,44 @@ export function TranscriptViewer({
             )}
           </div>
         </ScrollArea>
+
+        {/* Enhance Modal */}
+        <Dialog open={isEnhanceModalOpen} onOpenChange={setIsEnhanceModalOpen}>
+            <DialogContent className="sm:max-w-[425px]">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <Sparkles className="h-5 w-5 text-amber-500" />
+                        Enhance Transcript
+                    </DialogTitle>
+                    <DialogDescription>
+                        Use AI to fix grammar, remove filler words (um, uh), and improve readability.
+                    </DialogDescription>
+                </DialogHeader>
+                <div className="py-4">
+                    <p className="text-sm text-slate-600">
+                        This action will clean up the entire transcript and permanently save it.
+                    </p>
+                    <div className="mt-4 rounded-md bg-amber-50 p-3 text-sm text-amber-900 border border-amber-100">
+                        <strong>Cost:</strong> 1 Video Credit
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsEnhanceModalOpen(false)} disabled={isEnhancing}>
+                        Cancel
+                    </Button>
+                    <Button onClick={handleEnhance} disabled={isEnhancing}>
+                        {isEnhancing ? (
+                            <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Enhancing...
+                            </>
+                        ) : (
+                            "Enhance (1 Credit)"
+                        )}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
       </div>
     </TooltipProvider>
   );
