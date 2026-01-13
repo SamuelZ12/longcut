@@ -1909,6 +1909,42 @@ export default function AnalyzePage() {
         </section>
       )}
 
+      {videoId && topics.length === 0 && pageState === 'IDLE' && !error && (
+        <section className="flex min-h-[calc(100vh-11rem)] flex-col items-center justify-center px-5 text-center">
+          <Card className="w-full max-w-2xl border border-slate-200 bg-white/90 p-9 backdrop-blur-sm">
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">
+                  No highlights found
+                </h2>
+                <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+                  We processed the transcript but couldn't find any standout highlights matching your criteria. This sometimes happens if the video is very short, has no dialogue, or if the AI filters were too strict.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                <Link
+                  href="/"
+                  className="inline-flex items-center justify-center rounded-full border border-slate-200 px-4 py-2 text-xs font-medium text-slate-700 transition hover:bg-[#f8fafc]"
+                >
+                  Go to home
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Force regenerate logic
+                    processVideo(normalizedUrl, mode);
+                  }}
+                  className="inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white transition hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-50"
+                  disabled={isModeLoading}
+                >
+                  Try again
+                </button>
+              </div>
+            </div>
+          </Card>
+        </section>
+      )}
+
       {videoId && topics.length > 0 && pageState === 'IDLE' && (
         <div className="mx-auto w-full max-w-7xl px-5 pb-5 pt-0">
           {error && (
