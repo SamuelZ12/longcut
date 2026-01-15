@@ -1,0 +1,58 @@
+
+> nextjs@0.1.0 dev /app
+> next dev --turbopack --port 3000
+
+   ▲ Next.js 15.5.7 (Turbopack)
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.0.2:3000
+
+ ✓ Starting...
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
+
+ ○ Compiling middleware ...
+ ✓ Compiled middleware in 1223ms
+ ✓ Ready in 4.7s
+Auth token refresh failed: Auth session missing!
+ ○ Compiling /analyze/[videoId] ...
+ ✓ Compiled /analyze/[videoId] in 13.5s
+ GET /analyze/dQw4w9WgXcQ 200 in 16268ms
+Auth token refresh failed: Auth session missing!
+Auth token refresh failed: Auth session missing!
+ ○ Compiling /api/check-limit ...
+ ✓ Compiled /api/check-limit in 1912ms
+[Transcript Format] Detected old format transcript for YouTube ID: dQw4w9WgXcQ. Applying runtime sentence merging (cache not updated)...
+[Transcript Format] Original segments: 61
+[Transcript Format] Merged segments: 8
+[Transcript Format] Segment reduction: 86.9%
+ POST /api/check-video-cache 200 in 3245ms
+Auth token refresh failed: Auth session missing!
+Auth token refresh failed: Auth session missing!
+ GET /api/check-limit 200 in 3314ms
+Auth token refresh failed: Auth session missing!
+ ○ Compiling /api/video-analysis ...
+ ✓ Compiled /api/video-analysis in 1574ms
+ GET /api/image-limit 200 in 1736ms
+Auth token refresh failed: Auth session missing!
+ GET /api/image-limit 200 in 537ms
+Theme generation failed: Error: Grok API error (Client specified an invalid argument): Bad Request
+    at Object.generate (lib/ai-providers/grok-adapter.ts:184:17)
+    at async generateAIResponse (lib/ai-client.ts:63:18)
+    at async generateThemesFromTranscript (lib/ai-processing.ts:1444:22)
+    at async handler (app/api/video-analysis/route.ts:341:18)
+    at async securedHandler (lib/security-middleware.ts:113:24)
+  182 |             'Unknown error';
+  183 |           const code = parsed?.error?.code || parsed?.code;
+> 184 |           throw new Error(
+      |                 ^
+  185 |             `Grok API error${code ? ` (${code})` : ''}: ${message}`
+  186 |           );
+  187 |         }
+[Transcript Format] Detected old format transcript for YouTube ID: dQw4w9WgXcQ. Applying runtime sentence merging (cache not updated)...
+[Transcript Format] Original segments: 61
+[Transcript Format] Merged segments: 8
+[Transcript Format] Segment reduction: 86.9%
+ POST /api/video-analysis 200 in 3095ms
+ POST /api/transcript 200 in 3096ms

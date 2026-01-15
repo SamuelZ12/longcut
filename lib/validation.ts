@@ -38,6 +38,7 @@ export const sanitizedTextSchema = z.string()
 export const videoInfoSchema = z.object({
   title: z.string().min(1).max(200).transform(val => val.trim()),
   author: z.string().max(100).transform(val => val.trim()).optional(),
+  description: z.string().max(5000).optional(),
   duration: z.number().int().min(0).max(86400), // Max 24 hours
   thumbnail: z.string().url().optional(),
   // Use nullish() to accept both null and undefined (backward compat for old cached videos)

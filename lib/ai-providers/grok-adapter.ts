@@ -119,6 +119,7 @@ function buildPayload(params: ProviderGenerateParams) {
         json_schema: {
           name: ensureSchemaName(params.schemaName),
           schema: jsonSchema,
+          strict: true,
         },
       };
     } catch (error) {
