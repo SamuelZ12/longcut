@@ -1851,8 +1851,8 @@ export default function AnalyzePage() {
     const mergedMetadata = normalizedSelected
       ? {
         ...(editingNote.metadata ?? {}),
+        ...(metadata ?? {}),
         selectedText: normalizedSelected,
-        ...(metadata ?? {})
       }
       : {
         ...(editingNote.metadata ?? {}),
