@@ -1,0 +1,3 @@
+## 2024-05-23 - Transcript Viewer Rendering Optimization
+**Learning:** In list virtualization or long list rendering (like video transcripts), using inline render functions or calculating derived state (like highlighting) inside the map loop breaks memoization and causes O(N) re-renders on every update (e.g., time update).
+**Action:** Extract list items into `React.memo` components. Move complex derivation logic (highlighting) into the child component or pure functions. Use `useRef<Map>` instead of arrays for managing refs of list items to ensure O(1) access and stability without breaking memoization.
