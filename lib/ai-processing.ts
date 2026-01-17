@@ -14,7 +14,7 @@ import {
 import { generateAIResponse } from '@/lib/ai-client';
 import { getProviderKey } from '@/lib/ai-providers';
 import { topicGenerationSchema } from '@/lib/schemas';
-import { parseTimestampRange } from '@/lib/timestamp-utils';
+import { parseTimestampRange, formatTimestamp } from '@/lib/timestamp-utils';
 import { getLanguageName } from '@/lib/language-utils';
 import { repairJson } from '@/lib/json-utils';
 import { z } from 'zod';
@@ -210,7 +210,7 @@ function buildChunkPrompt(
   language?: string
 ): string {
   const transcript = formatTranscriptWithTimestamps(chunk.segments);
-  const chunkWindow = `[${formatTime(chunk.start)}-${formatTime(chunk.end)}]`;
+  const chunkWindow = `[${formatTimestamp(chunk.start)}-${formatTimestamp(chunk.end)}]`;
   const videoInfoBlock = formatVideoInfoForPrompt(videoInfo);
   const themeInstruction = theme
     ? `  <item>Focus exclusively on material that clearly expresses the theme "${theme}". Skip anything unrelated.</item>\n`
@@ -283,7 +283,7 @@ function buildReducePrompt(
     .map((candidate, idx) => {
       const timestamp = candidate.quote?.timestamp ?? '[??:??-??:??]';
       const quoteText = candidate.quote?.text ?? '';
-      const chunkWindow = `[${formatTime(candidate.chunkStart)}-${formatTime(
+      const chunkWindow = `[${formatTimestamp(candidate.chunkStart)}-${formatTimestamp(
         candidate.chunkEnd
       )}]`;
       return `Candidate ${idx + 1}
@@ -464,7 +464,7 @@ function buildFallbackTopics(
     fallbackTopics.push({
       title: theme ? `${theme} — part ${i + 1}` : `Part ${i + 1}`,
       quote: {
-        timestamp: `[${formatTime(startTime)}-${formatTime(endTime)}]`,
+        timestamp: `[${formatTimestamp(startTime)}-${formatTimestamp(endTime)}]`,
         text:
           chunkSegments
             .map((s) => s.text)
@@ -602,7 +602,7 @@ ${transcriptWithTimestamps}
           {
             title: fallbackLabel,
             quote: {
-              timestamp: `[00:00-${formatTime(fallbackEnd)}]`,
+              timestamp: `[00:00-${formatTimestamp(fallbackEnd)}]`,
               text: fullText.substring(0, 200)
             }
           }
@@ -629,19 +629,11 @@ function combineTranscript(segments: TranscriptSegment[]): string {
 function formatTranscriptWithTimestamps(segments: TranscriptSegment[]): string {
   return segments
     .map((s) => {
-      const startTime = formatTime(s.start);
-      const endTime = formatTime(s.start + s.duration);
+      const startTime = formatTimestamp(s.start);
+      const endTime = formatTimestamp(s.start + s.duration);
       return `[${startTime}-${endTime}] ${s.text}`;
     })
     .join('\n');
-}
-
-function formatTime(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins.toString().padStart(2, '0')}:${secs
-    .toString()
-    .padStart(2, '0')}`;
 }
 
 async function findExactQuotes(
