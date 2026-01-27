@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { TranscriptSegment, Topic, Citation, TranslationRequestHandler } from "@/lib/types";
 import { getTopicHSLColor, formatDuration } from "@/lib/utils";
-import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Eye, EyeOff, ChevronDown, Download, Loader2, Search, ChevronUp, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +11,7 @@ import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/comp
 import { Badge } from "@/components/ui/badge";
 import { SelectionActions, triggerExplainSelection, SelectionActionPayload } from "@/components/selection-actions";
 import { NoteMetadata } from "@/lib/types";
+import { TranscriptSegmentItem, SearchResult } from "./transcript-segment-item";
 
 interface TranscriptViewerProps {
   transcript: TranscriptSegment[];
@@ -47,7 +47,9 @@ export function TranscriptViewer({
   onRequestExport,
   exportButtonState,
 }: TranscriptViewerProps) {
-  const highlightedRefs = useRef<(HTMLDivElement | null)[]>([]);
+  // Use Map for O(1) lookups and better stability than array
+  const highlightedRefsMap = useRef<Map<number, HTMLDivElement>>(new Map());
+
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -62,7 +64,7 @@ export function TranscriptViewer({
   // Search state
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<{ segmentIndex: number; startIndex: number; endIndex: number }[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [currentResultIndex, setCurrentResultIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -118,7 +120,13 @@ export function TranscriptViewer({
 
   // Clear refs when topic changes
   useEffect(() => {
-    highlightedRefs.current = [];
+    // We don't strictly need to clear the Map because segments will re-register or unregister.
+    // However, to be safe against stale indices if transcript changes (unlikely here without remount), we can clear.
+    // But since segments call setRef on mount/unmount/update, the Map should stay in sync.
+    // The original code cleared the array. We can clear the Map to be safe,
+    // but we must rely on children re-registering.
+    // Since selectedTopic change causes children to re-render (prop change), they will re-register.
+    highlightedRefsMap.current.clear();
 
     // Debug: Verify segment indices match content
     if (selectedTopic && selectedTopic.segments.length > 0 && transcript.length > 0) {
@@ -151,8 +159,15 @@ export function TranscriptViewer({
 
   // Scroll to citation highlight when it changes
   useEffect(() => {
-    if (citationHighlight && highlightedRefs.current.length > 0) {
-      const firstHighlighted = highlightedRefs.current[0];
+    if (citationHighlight && highlightedRefsMap.current.size > 0) {
+      // Find the first highlighted segment
+      // Since map keys are indices, we can find min key
+      const indices = Array.from(highlightedRefsMap.current.keys());
+      if (indices.length === 0) return;
+
+      const firstIndex = Math.min(...indices);
+      const firstHighlighted = highlightedRefsMap.current.get(firstIndex);
+
       if (firstHighlighted && scrollViewportRef.current) {
         const viewport = scrollViewportRef.current;
         const elementTop = firstHighlighted.offsetTop;
@@ -221,7 +236,7 @@ export function TranscriptViewer({
     }
 
     const query = searchQuery.toLowerCase();
-    const results: { segmentIndex: number; startIndex: number; endIndex: number }[] = [];
+    const results: SearchResult[] = [];
 
     transcript.forEach((segment, segmentIndex) => {
       const text = segment.text.toLowerCase();
@@ -272,9 +287,6 @@ export function TranscriptViewer({
   }, [isSearchOpen]);
 
   // Jump to first result when search results change (if user typed something new)
-  // But careful not to jump unexpectedly if just typing more characters of same word?
-  // For now, let's just stick to the first result being selected but maybe not auto-scrolled unless requested.
-  // Actually, standard behavior is usually jump to first match.
   useEffect(() => {
       if (searchResults.length > 0 && currentResultIndex === 0) {
           const result = searchResults[0];
@@ -298,10 +310,18 @@ export function TranscriptViewer({
 
   // Scroll to first highlighted segment
   useEffect(() => {
-    if (selectedTopic && highlightedRefs.current[0] && autoScroll) {
-      setTimeout(() => {
-        scrollToElement(highlightedRefs.current[0]);
-      }, 100);
+    // We check size > 0 instead of highlightedRefs.current[0]
+    if (selectedTopic && highlightedRefsMap.current.size > 0 && autoScroll) {
+      const indices = Array.from(highlightedRefsMap.current.keys());
+      if (indices.length > 0) {
+        const firstIndex = Math.min(...indices);
+        const element = highlightedRefsMap.current.get(firstIndex);
+        if (element) {
+           setTimeout(() => {
+            scrollToElement(element);
+          }, 100);
+        }
+      }
     }
   }, [selectedTopic, autoScroll, scrollToElement]);
 
@@ -340,186 +360,8 @@ export function TranscriptViewer({
     }
   }, [handleUserScroll]);
 
-  const getSegmentTopic = (segment: TranscriptSegment): { topic: Topic; index: number } | null => {
-    for (let i = 0; i < topics.length; i++) {
-      const topic = topics[i];
-      const hasSegment = topic.segments.some(
-        (topicSeg) => segment.start >= topicSeg.start && segment.start < topicSeg.end
-      );
-      if (hasSegment) {
-        return { topic, index: i };
-      }
-    }
-    return null;
-  };
-
-
-  const getHighlightedText = (segment: TranscriptSegment, segmentIndex: number): { highlightedParts: Array<{ text: string; highlighted: boolean; isCitation?: boolean; isSearchMatch?: boolean; isCurrentSearchMatch?: boolean }> } | null => {
-    // Priority: Search > Citation/Topic
-
-    // Check for search matches in this segment
-    const segmentSearchResults = searchResults.filter(r => r.segmentIndex === segmentIndex);
-
-    if (segmentSearchResults.length > 0) {
-      const text = segment.text;
-      const parts: Array<{ text: string; highlighted: boolean; isCitation?: boolean; isSearchMatch?: boolean; isCurrentSearchMatch?: boolean }> = [];
-      let lastIndex = 0;
-
-      // Sort matches by start index to handle them in order
-      // (Though our search logic generates them in order anyway)
-
-      segmentSearchResults.forEach(match => {
-        // Text before match
-        if (match.startIndex > lastIndex) {
-          parts.push({
-            text: text.substring(lastIndex, match.startIndex),
-            highlighted: false
-          });
-        }
-
-        // Match text
-        const isCurrent = searchResults[currentResultIndex] === match;
-        parts.push({
-          text: text.substring(match.startIndex, match.endIndex),
-          highlighted: true,
-          isSearchMatch: true,
-          isCurrentSearchMatch: isCurrent
-        });
-
-        lastIndex = match.endIndex;
-      });
-
-      // Text after last match
-      if (lastIndex < text.length) {
-        parts.push({
-          text: text.substring(lastIndex),
-          highlighted: false
-        });
-      }
-
-      return { highlightedParts: parts };
-    }
-
-    // Determine what segments to highlight based on citation or topic
-    const segmentsToHighlight = citationHighlight
-      ? [citationHighlight]
-      : selectedTopic?.segments || [];
-
-    if (segmentsToHighlight.length === 0) return null;
-
-    const isCitation = !!citationHighlight;
-
-    // Check each segment to see if this transcript segment should be highlighted
-    for (const highlightSeg of segmentsToHighlight) {
-      // Use segment indices with character offsets for precise matching
-      if (highlightSeg.startSegmentIdx !== undefined && highlightSeg.endSegmentIdx !== undefined) {
-
-        // Skip this debug logging - removed for cleaner output
-
-        // Skip segments that are before the start or after the end
-        if (segmentIndex < highlightSeg.startSegmentIdx || segmentIndex > highlightSeg.endSegmentIdx) {
-          continue;
-        }
-
-        // Case 1: This segment is between start and end (not at boundaries)
-        if (segmentIndex > highlightSeg.startSegmentIdx && segmentIndex < highlightSeg.endSegmentIdx) {
-          return {
-            highlightedParts: [{ text: segment.text, highlighted: true, isCitation }]
-          };
-        }
-
-        // Case 2: This is the start segment - may need partial highlighting
-        if (segmentIndex === highlightSeg.startSegmentIdx) {
-          if (highlightSeg.startCharOffset !== undefined && highlightSeg.startCharOffset > 0) {
-            // Partial highlight from character offset to end
-            const beforeHighlight = segment.text.substring(0, highlightSeg.startCharOffset);
-            const highlighted = segment.text.substring(highlightSeg.startCharOffset);
-
-            // If this is also the end segment, apply end offset
-            if (segmentIndex === highlightSeg.endSegmentIdx && highlightSeg.endCharOffset !== undefined) {
-              const actualHighlighted = segment.text.substring(
-                highlightSeg.startCharOffset,
-                Math.min(highlightSeg.endCharOffset, segment.text.length)
-              );
-              const afterHighlight = segment.text.substring(Math.min(highlightSeg.endCharOffset, segment.text.length));
-
-              const parts: Array<{ text: string; highlighted: boolean; isCitation?: boolean }> = [];
-              if (beforeHighlight) parts.push({ text: beforeHighlight, highlighted: false });
-              if (actualHighlighted) parts.push({ text: actualHighlighted, highlighted: true, isCitation });
-              if (afterHighlight) parts.push({ text: afterHighlight, highlighted: false });
-              return { highlightedParts: parts };
-            }
-
-            const parts: Array<{ text: string; highlighted: boolean; isCitation?: boolean }> = [];
-            if (beforeHighlight) parts.push({ text: beforeHighlight, highlighted: false });
-            if (highlighted) parts.push({ text: highlighted, highlighted: true, isCitation });
-            return { highlightedParts: parts };
-          } else {
-            // No offset or offset is 0, highlight from beginning
-            if (segmentIndex === highlightSeg.endSegmentIdx && highlightSeg.endCharOffset !== undefined) {
-              // This is both start and end segment
-              const highlighted = segment.text.substring(0, highlightSeg.endCharOffset);
-              const afterHighlight = segment.text.substring(highlightSeg.endCharOffset);
-
-              const parts: Array<{ text: string; highlighted: boolean; isCitation?: boolean }> = [];
-              if (highlighted) parts.push({ text: highlighted, highlighted: true, isCitation });
-              if (afterHighlight) parts.push({ text: afterHighlight, highlighted: false });
-              return { highlightedParts: parts };
-            }
-            // Highlight entire segment
-            return {
-              highlightedParts: [{ text: segment.text, highlighted: true, isCitation }]
-            };
-          }
-        }
-
-        // Case 3: This is the end segment (only if different from start) - may need partial highlighting
-        if (segmentIndex === highlightSeg.endSegmentIdx && segmentIndex !== highlightSeg.startSegmentIdx) {
-          if (highlightSeg.endCharOffset !== undefined && highlightSeg.endCharOffset < segment.text.length) {
-            // Partial highlight from beginning to character offset
-            const highlighted = segment.text.substring(0, highlightSeg.endCharOffset);
-            const afterHighlight = segment.text.substring(highlightSeg.endCharOffset);
-
-            const parts: Array<{ text: string; highlighted: boolean; isCitation?: boolean }> = [];
-            if (highlighted) parts.push({ text: highlighted, highlighted: true, isCitation });
-            if (afterHighlight) parts.push({ text: afterHighlight, highlighted: false });
-            return { highlightedParts: parts };
-          } else {
-            // No offset or offset covers entire segment
-            return {
-              highlightedParts: [{ text: segment.text, highlighted: true, isCitation }]
-            };
-          }
-        }
-      }
-    }
-
-    // Only use time-based highlighting if NO segments have index information
-    const hasAnySegmentIndices = segmentsToHighlight.some(seg =>
-      seg.startSegmentIdx !== undefined && seg.endSegmentIdx !== undefined
-    );
-
-    if (!hasAnySegmentIndices) {
-      // Fallback to time-based highlighting only if segment indices aren't available at all
-      const segmentEnd = segment.start + segment.duration;
-      const shouldHighlight = segmentsToHighlight.some(highlightSeg => {
-        const overlapStart = Math.max(segment.start, highlightSeg.start);
-        const overlapEnd = Math.min(segmentEnd, highlightSeg.end);
-        const overlapDuration = Math.max(0, overlapEnd - overlapStart);
-        const overlapRatio = overlapDuration / segment.duration;
-        // Highlight if there's significant overlap (more than 50% of the segment)
-        return overlapRatio > 0.5;
-      });
-
-      if (shouldHighlight) {
-        return {
-          highlightedParts: [{ text: segment.text, highlighted: true, isCitation }]
-        };
-      }
-    }
-
-    return null;
-  };
+  // Removed getSegmentTopic as it was unused
+  // Removed getHighlightedText as it was moved to TranscriptSegmentItem
 
   // Find the single best matching segment for the current time
   const getCurrentSegmentIndex = (): number => {
@@ -547,21 +389,38 @@ export function TranscriptViewer({
     });
   };
 
-  const handleSegmentClick = (segment: TranscriptSegment, e: React.MouseEvent) => {
+  const handleSegmentClick = useCallback((segment: TranscriptSegment, e: React.MouseEvent) => {
     // Check if there is a text selection (dragging)
     const selection = window.getSelection();
     if (selection && selection.toString().length > 0) {
       return; // Do nothing if text is selected
     }
 
-    // Check if the user is dragging (moved mouse significantly between down and up)
-    // Actually, selection check handles this mostly, but if they drag and don't select anything (empty selection)?
-    // The requirement is "dragging to select text". If they drag but select nothing, maybe they still meant to drag?
-    // But usually click implies mousedown and mouseup at same location.
-
     // Seek to the start of the segment
     onTimestampClick(segment.start);
-  };
+  }, [onTimestampClick]);
+
+  const handleSetRef = useCallback((el: HTMLDivElement | null, index: number, hasHighlight: boolean, isCurrent: boolean) => {
+    if (el) {
+        if (hasHighlight) {
+            highlightedRefsMap.current.set(index, el);
+        } else {
+            highlightedRefsMap.current.delete(index);
+        }
+
+        if (isCurrent) {
+            currentSegmentRef.current = el;
+        }
+    } else {
+        highlightedRefsMap.current.delete(index);
+        // We don't strictly need to clear currentSegmentRef as it will be overwritten by new current segment.
+        // But if this segment was current and now is unmounting (e.g. transcript list changed),
+        // we might want to clear it if it matches.
+        if (currentSegmentRef.current === el) {
+             currentSegmentRef.current = null;
+        }
+    }
+  }, []);
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -824,130 +683,31 @@ export function TranscriptViewer({
                 const currentSegmentIndex = getCurrentSegmentIndex();
 
                 return transcript.map((segment, index) => {
-                  const highlightedText = getHighlightedText(segment, index);
                   const isCurrent = index === currentSegmentIndex;
-                  getSegmentTopic(segment);
-
-                  const hasHighlight = highlightedText !== null;
                   const translation = translationsCache.get(index);
                   const isLoadingTranslation = loadingTranslations.has(index);
                   const hasTranslationError = translationErrors.has(index);
                   const translationEnabled = selectedLanguage !== null;
 
-                  // Request translation if enabled and not already cached/loading/errored
-                  if (translationEnabled && !translation && !isLoadingTranslation && !hasTranslationError) {
-                    requestTranslation(index);
-                  }
-
                   return (
-                    <div
+                    <TranscriptSegmentItem
                       key={index}
-                      data-segment-index={index}
-                      ref={(el) => {
-                        // Store refs properly
-                        if (el) {
-                          if (hasHighlight && !highlightedRefs.current.includes(el)) {
-                            highlightedRefs.current.push(el);
-                          }
-                          if (isCurrent) {
-                            currentSegmentRef.current = el;
-                          }
-                        }
-                      }}
-                      className={cn(
-                        "group relative px-2.5 py-1.5 rounded-xl transition-all duration-200 cursor-pointer hover:bg-slate-50",
-                        translationEnabled && "space-y-1"
-                      )}
-                      onClick={(e) => handleSegmentClick(segment, e)}
-                    >
-                      {/* Original text */}
-                      <p
-                        className={cn(
-                          "text-sm leading-relaxed",
-                          isCurrent ? "text-foreground font-medium" : "text-muted-foreground",
-                          translationEnabled && "opacity-90"
-                        )}
-                      >
-                        {highlightedText ? (
-                          highlightedText.highlightedParts.map((part, partIndex) => {
-                            const isSearchMatch = 'isSearchMatch' in part && part.isSearchMatch;
-                            const isCurrentSearchMatch = 'isCurrentSearchMatch' in part && part.isCurrentSearchMatch;
-                            const isCitation = 'isCitation' in part && part.isCitation;
-
-                            let style = undefined;
-                            if (part.highlighted) {
-                              if (isSearchMatch) {
-                                style = {
-                                  backgroundColor: isCurrentSearchMatch ? 'hsl(40, 100%, 50%)' : 'hsl(48, 100%, 80%)',
-                                  color: isCurrentSearchMatch ? 'white' : 'black',
-                                  padding: '0 1px',
-                                  borderRadius: '2px',
-                                };
-                              } else if (isCitation || selectedTopic?.isCitationReel) {
-                                style = {
-                                  backgroundColor: 'hsl(48, 100%, 85%)',
-                                  padding: '1px 3px',
-                                  borderRadius: '3px',
-                                  boxShadow: '0 0 0 1px hsl(48, 100%, 50%, 0.3)',
-                                };
-                              } else if (selectedTopicColor) {
-                                style = {
-                                  backgroundColor: `hsl(${selectedTopicColor} / 0.2)`,
-                                  padding: '0 2px',
-                                  borderRadius: '2px',
-                                };
-                              }
-                            }
-
-                            return (
-                              <span
-                                key={partIndex}
-                                className={part.highlighted ? "text-foreground" : ""}
-                                style={style}
-                              >
-                                {part.text}
-                              </span>
-                            );
-                          })
-                        ) : (
-                          segment.text
-                        )}
-                      </p>
-
-                      {/* Translated text */}
-                      {translationEnabled && (
-                        <div className="flex items-start gap-2">
-                          <p
-                            className={cn(
-                              "text-sm leading-relaxed flex-1",
-                              isCurrent ? "text-foreground font-medium" : "text-muted-foreground"
-                            )}
-                          >
-                            {isLoadingTranslation ? (
-                              <span className="text-muted-foreground italic">Translating...</span>
-                            ) : hasTranslationError ? (
-                              <span className="text-red-500/70 italic text-xs">Translation failed</span>
-                            ) : translation ? (
-                              translation
-                            ) : (
-                              <span className="text-muted-foreground/50 italic">Translation pending...</span>
-                            )}
-                          </p>
-                          {hasTranslationError && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                requestTranslation(index);
-                              }}
-                              className="text-xs text-blue-500 hover:text-blue-600 underline shrink-0"
-                            >
-                              Retry
-                            </button>
-                          )}
-                        </div>
-                      )}
-
-                    </div>
+                      segment={segment}
+                      index={index}
+                      isCurrent={isCurrent}
+                      searchResults={searchResults}
+                      currentResultIndex={currentResultIndex}
+                      citationHighlight={citationHighlight}
+                      selectedTopic={selectedTopic}
+                      selectedTopicColor={selectedTopicColor}
+                      translation={translation}
+                      isLoadingTranslation={isLoadingTranslation}
+                      hasTranslationError={hasTranslationError}
+                      translationEnabled={translationEnabled}
+                      onRequestTranslation={requestTranslation}
+                      onSegmentClick={handleSegmentClick}
+                      setRef={handleSetRef}
+                    />
                   );
                 });
               })()
