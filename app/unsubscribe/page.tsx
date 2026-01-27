@@ -7,6 +7,7 @@ import Link from 'next/link';
 function UnsubscribeContent() {
   const searchParams = useSearchParams();
   const userId = searchParams.get('uid');
+  const token = searchParams.get('token');
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
 
   useEffect(() => {
@@ -22,7 +23,7 @@ function UnsubscribeContent() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ userId }),
+          body: JSON.stringify({ userId, token }),
         });
 
         if (response.ok) {
