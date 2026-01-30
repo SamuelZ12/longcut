@@ -2225,6 +2225,25 @@ export default function AnalyzePage() {
     setEditingNote(null);
   }, []);
 
+  const handleEditNote = useCallback(
+    (note: Note) => {
+      if (!user) {
+        promptSignInForNotes();
+        return;
+      }
+
+      rightColumnTabsRef.current?.switchToNotes();
+
+      setEditingNote({
+        id: note.id,
+        text: note.text || "",
+        metadata: note.metadata || null,
+        source: note.source,
+      });
+    },
+    [user, promptSignInForNotes],
+  );
+
   return (
     <div className="min-h-screen bg-white pt-12 pb-2">
       {pageState === "IDLE" && !videoId && !routeVideoId && !urlParam && (
@@ -2449,6 +2468,7 @@ export default function AnalyzePage() {
                   editingNote={editingNote}
                   onSaveEditingNote={handleSaveEditingNote}
                   onCancelEditing={handleCancelEditing}
+                  onEditNote={handleEditNote}
                   onAddNote={handleAddNote}
                   isAuthenticated={!!user}
                   onRequestSignIn={handleAuthRequired}

@@ -1,6 +1,6 @@
-# LongCut
+# Little universe
 
-LongCut turns long-form YouTube videos into a structured learning workspace. Paste a URL and the app generates highlight reels, timestamped AI answers, and a place to capture your own notes so you can absorb an hour-long video in minutes.
+Little universe turns long-form YouTube videos into a structured learning workspace. Paste a URL and the app generates highlight reels, timestamped AI answers, and a place to capture your own notes so you can absorb an hour-long video in minutes.
 
 ## Overview
 

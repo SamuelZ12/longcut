@@ -6,6 +6,15 @@ import { getTopicHSLColor } from "@/lib/utils";
 import { TopicCard } from "@/components/topic-card";
 import { cn } from "@/lib/utils";
 
+// Pastel color palette from reference design
+const CATEGORY_COLORS = [
+  "#FF8A80", // Coral
+  "#80CBC4", // Mint green
+  "#F48FB1", // Light pink
+  "#B39DDB", // Lavender
+  "#81D4FA", // Light blue
+];
+
 interface VideoProgressBarProps {
   videoDuration: number;
   currentTime: number;
@@ -105,23 +114,28 @@ export function VideoProgressBar({
     };
   };
 
+  // Get color for topic based on index
+  const getTopicColor = (index: number) => {
+    return CATEGORY_COLORS[index % CATEGORY_COLORS.length];
+  };
+
   return (
     <div className="relative w-full space-y-2">
       {/* Main progress bar - Click to navigate */}
       {hasDuration && (
         <div
           ref={progressBarRef}
-          className="relative h-12 bg-muted rounded-lg overflow-hidden cursor-pointer group transition-all hover:ring-2 hover:ring-primary/50"
+          className="relative h-12 bg-white/50 backdrop-blur-sm rounded-2xl overflow-hidden cursor-pointer group transition-all hover:ring-2 hover:ring-blue-400/50 shadow-md border border-blue-100"
           onClick={handleBackgroundClick}
         >
-          {/* Heatmap background */}
+          {/* Heatmap background with gradient */}
           <div className="absolute inset-0 flex pointer-events-none">
             {density.map((d, i) => (
               <div
                 key={i}
                 className="flex-1 h-full transition-opacity"
                 style={{
-                  backgroundColor: `hsl(var(--primary) / ${d * 0.2})`,
+                  backgroundColor: `rgba(129, 212, 250, ${d * 0.3})`,
                 }}
               />
             ))}
@@ -137,14 +151,15 @@ export function VideoProgressBar({
                 <div
                   key={key}
                   className={cn(
-                    "absolute top-2 h-8 rounded-md transition-all cursor-pointer hover:opacity-100 hover:scale-105",
-                    isSelected && "z-30 ring-2 ring-white"
+                    "absolute top-2 h-8 rounded-xl transition-all cursor-pointer hover:opacity-100 hover:scale-105",
+                    isSelected && "z-30 shadow-lg"
                   )}
                   style={{
                     left,
                     width,
-                    backgroundColor: `hsl(${getTopicHSLColor(topicIndex, videoId)})`,
-                    opacity: isSelected ? 1 : 0.7,
+                    backgroundColor: isSelected ? "#81D4FA" : getTopicColor(topicIndex),
+                    opacity: isSelected ? 1 : 0.75,
+                    borderLeft: isSelected ? "3px solid #29B6F6" : "none",
                   }}
                   onClick={(e) => handleTopicClick(e, topic)}
                 />
@@ -154,12 +169,12 @@ export function VideoProgressBar({
 
           {/* Current time indicator */}
           <div
-            className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-30 pointer-events-none transition-all"
+            className="absolute top-0 bottom-0 w-0.5 bg-blue-400 z-30 pointer-events-none transition-all shadow-sm"
             style={{
               left: `${(currentTime / videoDuration) * 100}%`,
             }}
           >
-            <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-red-500 rounded-full" />
+            <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-blue-400 rounded-full shadow-md" />
           </div>
         </div>
       )}

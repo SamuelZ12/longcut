@@ -57,7 +57,7 @@ async function main() {
   // Get the Pro product
   const products = await stripe.products.list({ limit: 20 });
   const proProduct = products.data.find(p =>
-    p.name.includes('LongCut Pro') ||
+    p.name.includes('Little universe Pro') ||
     p.name.includes('TLDW Pro') ||
     p.name.includes('Pro Subscription')
   );
@@ -69,7 +69,7 @@ async function main() {
   );
 
   if (!proProduct) {
-    console.error('❌ Could not find LongCut Pro product');
+    console.error('❌ Could not find Little universe Pro product');
     console.error('   Please create the product first in your Stripe dashboard');
     process.exit(1);
   }
@@ -121,8 +121,8 @@ async function main() {
     console.log('\n⚠️  Could not find Top-Up product');
     console.log('   Creating new Top-Up product...');
     const newTopupProduct = await stripe.products.create({
-      name: 'LongCut Top-Up Credits',
-      description: '20 additional video credits for LongCut',
+      name: 'Little universe Top-Up Credits',
+      description: '20 additional video credits for Little universe',
     });
     console.log(`✅ Created product: ${newTopupProduct.id}`);
 

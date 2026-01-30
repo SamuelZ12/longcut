@@ -80,6 +80,7 @@ interface RightColumnPanelProps {
     metadata?: NoteMetadata;
   }) => void;
   onCancelEditing?: () => void;
+  onEditNote?: (note: Note) => void;
   isAuthenticated?: boolean;
   onRequestSignIn?: () => void;
   selectedLanguage?: string | null;
@@ -126,6 +127,7 @@ export const RightColumnPanel = forwardRef<
       editingNote,
       onSaveEditingNote,
       onCancelEditing,
+      onEditNote,
       isAuthenticated,
       onRequestSignIn,
       selectedLanguage = null,
@@ -185,11 +187,21 @@ export const RightColumnPanel = forwardRef<
           editingNote={editingNote}
           onSaveEditingNote={onSaveEditingNote}
           onCancelEditing={onCancelEditing}
+          onEditNote={onEditNote}
           isAuthenticated={isAuthenticated}
           onSignInClick={onRequestSignIn}
           currentTime={currentTime}
           onTimestampClick={onTimestampClick}
           onAddNote={onAddNote}
+          videoInfo={videoInfo ? {
+            youtubeId: videoId,
+            title: videoInfo.title,
+            author: videoInfo.author,
+            duration: videoInfo.duration,
+            description: videoInfo.description,
+            thumbnailUrl: videoInfo.thumbnailUrl
+          } : null}
+          topics={topics}
         />
       </TooltipProvider>
     );

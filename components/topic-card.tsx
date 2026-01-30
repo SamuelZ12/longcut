@@ -5,6 +5,15 @@ import { Topic, TranslationRequestHandler } from "@/lib/types";
 import { formatDuration, getTopicHSLColor } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
+// Pastel color palette from reference design
+const CATEGORY_COLORS = [
+  "#FF8A80", // Coral
+  "#80CBC4", // Mint green
+  "#F48FB1", // Light pink
+  "#B39DDB", // Lavender
+  "#81D4FA", // Light blue
+];
+
 interface TopicCardProps {
   topic: Topic;
   isSelected: boolean;
@@ -17,7 +26,7 @@ interface TopicCardProps {
 }
 
 export function TopicCard({ topic, isSelected, onClick, topicIndex, onPlayTopic, videoId, selectedLanguage = null, onRequestTranslation }: TopicCardProps) {
-  const topicColor = getTopicHSLColor(topicIndex, videoId);
+  const topicColor = CATEGORY_COLORS[topicIndex % CATEGORY_COLORS.length];
   const [translatedTitle, setTranslatedTitle] = useState<string | null>(null);
   const [isLoadingTranslation, setIsLoadingTranslation] = useState(false);
 
@@ -35,12 +44,12 @@ export function TopicCard({ topic, isSelected, onClick, topicIndex, onPlayTopic,
 
     // Request translation
     setIsLoadingTranslation(true);
-    
+
     // Cache key includes source text to avoid collisions when topic ids are reused
     const cacheKey = `topic-title:${selectedLanguage}:${topic.title}`;
-    
+
     let isCancelled = false;
-    
+
     onRequestTranslation(topic.title, cacheKey, 'topic')
       .then(translation => {
         if (!isCancelled) {
@@ -71,34 +80,30 @@ export function TopicCard({ topic, isSelected, onClick, topicIndex, onPlayTopic,
       onPlayTopic();
     }
   };
-  
+
   return (
     <button
       className={cn(
-        "w-full px-3 py-1.5 rounded-xl",
+        "w-full px-3 py-2 rounded-xl",
         "flex items-center justify-between gap-2.5",
         "transition-all duration-200",
-        "hover:scale-[1.01] hover:shadow-[0px_0px_11px_0px_rgba(0,0,0,0.1)]",
+        "hover:scale-[1.01]",
         "text-left",
-        isSelected && "scale-[1.01] shadow-[0px_0px_11px_0px_rgba(0,0,0,0.1)]",
+        isSelected ? "shadow-md" : "shadow-sm"
       )}
       style={{
-        backgroundColor: isSelected
-          ? `hsl(${topicColor} / 0.15)`
-          : `hsl(${topicColor} / 0.08)`,
+        backgroundColor: isSelected ? "rgba(129, 212, 250, 0.25)" : "rgba(255, 255, 255, 0.7)",
+        borderLeft: isSelected ? "3px solid #81D4FA" : "none",
       }}
       onClick={handleClick}
     >
       <div className="flex items-start gap-2 flex-1 min-w-0">
         <div
-          className={cn(
-            "rounded-full shrink-0 transition-all mt-0.5",
-            isSelected ? "w-3.5 h-3.5" : "w-3 h-3"
-          )}
-          style={{ backgroundColor: `hsl(${topicColor})` }}
+          className="rounded-full shrink-0 mt-0.5 w-3 h-3 transition-all shadow-sm"
+          style={{ backgroundColor: topicColor }}
         />
         <div className="flex-1 min-w-0">
-          <span className="font-medium text-sm truncate block">
+          <span className="text-sm truncate block text-gray-800 font-medium">
             {selectedLanguage !== null
               ? (isLoadingTranslation ? "Translating..." : translatedTitle || topic.title)
               : topic.title
@@ -107,7 +112,7 @@ export function TopicCard({ topic, isSelected, onClick, topicIndex, onPlayTopic,
         </div>
       </div>
 
-      <span className="font-mono text-xs text-muted-foreground shrink-0">
+      <span className="font-mono text-xs text-gray-600 shrink-0">
         {formatDuration(topic.duration)}
       </span>
     </button>

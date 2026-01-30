@@ -140,7 +140,7 @@ export default function PricingContent({ isAuthenticated, tier, status, cancelAt
                 <p className="text-[16px] font-medium text-black mb-10">Basic</p>
                 <h2 className="text-[32px] font-semibold mb-0">Free</h2>
                 <p className="text-[11px] text-muted-foreground mt-0">
-                  Try LongCut for free, no card required
+                  Try Little universe for free, no card required
                 </p>
               </div>
             </div>

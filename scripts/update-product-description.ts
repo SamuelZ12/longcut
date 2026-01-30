@@ -2,7 +2,7 @@
 /**
  * Update Stripe Product Description Script
  *
- * This script updates the LongCut Pro product description to show the correct
+ * This script updates the Little universe Pro product description to show the correct
  * video limit (100 videos per month instead of 40).
  *
  * Usage:
@@ -60,20 +60,20 @@ function initializeStripe(): Stripe {
     apiVersion: '2024-10-28.acacia' as any,
     typescript: true,
     appInfo: {
-      name: 'LongCut',
+      name: 'Little universe',
       version: '1.0.0',
     },
   });
 }
 
 /**
- * Find the LongCut Pro product
+ * Find the Little universe Pro product
  */
-async function findLongCutProProduct(stripe: Stripe): Promise<Stripe.Product | null> {
+async function findLittle universeProProduct(stripe: Stripe): Promise<Stripe.Product | null> {
   try {
     const products = await stripe.products.list({ limit: 100 });
     const proProduct = products.data.find(
-      p => p.name.includes('LongCut Pro') || p.name.includes('Pro')
+      p => p.name.includes('Little universe Pro') || p.name.includes('Pro')
     );
     return proProduct || null;
   } catch (error) {
@@ -127,7 +127,7 @@ async function updateProductDescription(
  */
 async function main() {
   console.log('🚀 Update Stripe Product Description\n');
-  console.log('This script will update the LongCut Pro product description.\n');
+  console.log('This script will update the Little universe Pro product description.\n');
 
   // Initialize Stripe
   const stripe = initializeStripe();
@@ -135,12 +135,12 @@ async function main() {
   const isTestMode = process.env.STRIPE_SECRET_KEY?.includes('_test_');
   console.log(`ℹ️  Mode: ${isTestMode ? 'TEST' : 'LIVE'}\n`);
 
-  // Find the LongCut Pro product
-  console.log('🔍 Searching for LongCut Pro product...\n');
-  const product = await findLongCutProProduct(stripe);
+  // Find the Little universe Pro product
+  console.log('🔍 Searching for Little universe Pro product...\n');
+  const product = await findLittle universeProProduct(stripe);
 
   if (!product) {
-    console.error('❌ Error: Could not find LongCut Pro product');
+    console.error('❌ Error: Could not find Little universe Pro product');
     console.error('   Please check your Stripe dashboard to verify the product exists\n');
     process.exit(1);
   }

@@ -2,9 +2,9 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 
 export const metadata: Metadata = {
-  title: 'Terms of Service | LongCut',
+  title: 'Terms of Service | Little universe',
   description:
-    'Understand how LongCut subscriptions, billing, and the 48-hour refund window for the annual Pro plan work.',
+    'Understand how Little universe subscriptions, billing, and the 48-hour refund window for the annual Pro plan work.',
 }
 
 const supportEmail = 'zara@longcut.ai'
@@ -16,16 +16,16 @@ export default function TermsPage() {
         <h1 className="text-3xl font-bold tracking-tight text-[#3f3f3f]">Terms of Service</h1>
         <p className="text-sm text-muted-foreground">Last updated: November 11, 2025</p>
         <p>
-          These Terms of Service (&ldquo;Terms&rdquo;) govern your access to and use of LongCut (&ldquo;we&rdquo;,
+          These Terms of Service (&ldquo;Terms&rdquo;) govern your access to and use of Little universe (&ldquo;we&rdquo;,
           &ldquo;us&rdquo;, or &ldquo;our&rdquo;). By creating an account or using the product, you agree to these
-          Terms. If you do not agree, please do not use LongCut.
+          Terms. If you do not agree, please do not use Little universe.
         </p>
       </header>
 
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">Account &amp; Eligibility</h2>
         <p>
-          You are responsible for maintaining the security of your LongCut account and the credentials associated with it.
+          You are responsible for maintaining the security of your Little universe account and the credentials associated with it.
           You must provide accurate information when you sign up and keep your contact details up to date so we can send
           important notices about your subscription.
         </p>
@@ -34,7 +34,7 @@ export default function TermsPage() {
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">Subscriptions &amp; Billing</h2>
         <p>
-          LongCut offers both free access and paid Pro subscriptions that deliver additional features and higher usage
+          Little universe offers both free access and paid Pro subscriptions that deliver additional features and higher usage
           limits. When you activate a paid plan, Stripe securely processes your payment information on our behalf. You
           authorize us to charge the applicable subscription fees (and any related taxes) at the start of each billing
           period until you cancel.
@@ -71,7 +71,7 @@ export default function TermsPage() {
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">Cancellation</h2>
         <p>
-          You can cancel your subscription at any time from your LongCut account settings. Navigate to{' '}
+          You can cancel your subscription at any time from your Little universe account settings. Navigate to{' '}
           <Link className="font-medium text-[#3f3f3f] underline underline-offset-4" href="/settings">
             Settings &rarr; Manage billing
           </Link>{' '}
@@ -83,7 +83,7 @@ export default function TermsPage() {
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">Acceptable Use</h2>
         <p>
-          You agree not to misuse LongCut, interfere with other users, or attempt to access the service using automated
+          You agree not to misuse Little universe, interfere with other users, or attempt to access the service using automated
           scripts at a rate that would degrade performance. We may suspend or terminate accounts that violate these
           Terms or applicable law.
         </p>
@@ -93,7 +93,7 @@ export default function TermsPage() {
         <h2 className="text-2xl font-semibold tracking-tight text-[#3f3f3f]">Changes to These Terms</h2>
         <p>
           We may update these Terms from time to time. If we make material changes, we will notify you via email or an
-          in-app message and indicate the effective date. Your continued use of LongCut after the update becomes effective
+          in-app message and indicate the effective date. Your continued use of Little universe after the update becomes effective
           means you accept the revised Terms.
         </p>
       </section>

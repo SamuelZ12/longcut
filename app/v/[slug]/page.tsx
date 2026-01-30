@@ -86,7 +86,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
   if (!resolved) {
     return {
-      title: 'Video Not Found - LongCut',
+      title: 'Video Not Found - Little universe',
       description: 'This video analysis could not be found.'
     };
   }
@@ -106,7 +106,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const thumbnailUrl = video.thumbnail_url || `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
 
   return {
-    title: `${video.title} - Transcript & Analysis | LongCut`,
+    title: `${video.title} - Transcript & Analysis | Little universe`,
     description,
     keywords: [
       video.title,
@@ -123,7 +123,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       description: description,
       type: 'video.other',
       url: `https://longcut.ai/v/${slugForMeta}`,
-      siteName: 'LongCut',
+      siteName: 'Little universe',
       images: [
         {
           url: thumbnailUrl,
@@ -251,7 +251,7 @@ export default async function VideoPage({ params }: PageProps) {
     },
     "publisher": {
       "@type": "Organization",
-      "name": "LongCut",
+      "name": "Little universe",
       "url": "https://longcut.ai"
     },
     "author": {
@@ -275,7 +275,7 @@ export default async function VideoPage({ params }: PageProps) {
     },
     "publisher": {
       "@type": "Organization",
-      "name": "LongCut",
+      "name": "Little universe",
       "url": "https://longcut.ai"
     },
     "mainEntityOfPage": {

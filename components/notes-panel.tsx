@@ -1,21 +1,24 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Note, NoteSource, NoteMetadata } from "@/lib/types";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Trash2, Clock, Plus } from "lucide-react";
+import { Trash2, Clock, Plus, Download, Edit, Search, Filter, X } from "lucide-react";
 import { NoteEditor } from "@/components/note-editor";
 import { cn } from "@/lib/utils";
+import { exportNotesToMarkdown } from "@/lib/markdown-exporter";
+import { getLocalNotes, type LocalNote } from "@/lib/local-notes";
 
 function formatDateOnly(dateString: string): string {
   const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', { 
-    month: 'short', 
-    day: 'numeric', 
-    year: 'numeric' 
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
   });
 }
 
@@ -80,6 +83,7 @@ export interface EditingNote {
   text: string;
   metadata?: NoteMetadata | null;
   source?: string;
+  id?: string; // Note ID for editing existing note
 }
 
 interface NotesPanelProps {
@@ -88,25 +92,31 @@ interface NotesPanelProps {
   editingNote?: EditingNote | null;
   onSaveEditingNote?: (payload: { noteText: string; selectedText: string; metadata?: NoteMetadata }) => void;
   onCancelEditing?: () => void;
+  onEditNote?: (note: Note) => void; // New: Edit existing note
   isAuthenticated?: boolean;
   onSignInClick?: () => void;
   currentTime?: number;
   onTimestampClick?: (seconds: number) => void;
   onAddNote?: () => void;
+  // Export props
+  videoInfo?: { youtubeId: string; title?: string; author?: string; duration?: number; description?: string; thumbnailUrl?: string } | null;
+  topics?: any[]; // Topic array from video analysis
 }
 
 function getSourceLabel(source: NoteSource) {
   switch (source) {
     case "chat":
-      return "AI Message";
+      return "💬 AI 对话";
     case "takeaways":
-      return "Takeaways";
+      return "🎯 关键要点";
     case "transcript":
-      return "Transcript";
+      return "🎬 视频片段";
     default:
-      return "Custom";
+      return "✏️ 自定义笔记";
   }
 }
+
+type FilterType = 'all' | 'transcript' | 'chat' | 'custom' | 'takeaways';
 
 export function NotesPanel({
   notes = [],
@@ -114,28 +124,91 @@ export function NotesPanel({
   editingNote,
   onSaveEditingNote,
   onCancelEditing,
+  onEditNote,
   isAuthenticated = true,
   onSignInClick,
   currentTime,
   onTimestampClick,
-  onAddNote
+  onAddNote,
+  videoInfo,
+  topics
 }: NotesPanelProps) {
+  const [isExporting, setIsExporting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState<FilterType>('all');
+  const [showFilters, setShowFilters] = useState(false);
+
+  const handleExport = async () => {
+    if (!videoInfo) return;
+
+    setIsExporting(true);
+    try {
+      // Get local notes for this video
+      const localNotes = getLocalNotes(videoInfo.youtubeId);
+
+      // Combine with displayed notes (removing duplicates)
+      const allNotes = [
+        ...notes,
+        ...localNotes.filter(ln => !notes.find(n => n.id === ln.id))
+      ];
+
+      // Export to markdown
+      await exportNotesToMarkdown(videoInfo, allNotes, topics);
+    } catch (error) {
+      console.error('Export failed:', error);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleEditClick = (note: Note) => {
+    if (onEditNote) {
+      onEditNote(note);
+    }
+  };
+
+  // Filter and search notes
+  const filteredNotes = useMemo(() => {
+    let filtered = notes;
+
+    // Apply source filter
+    if (filterType !== 'all') {
+      filtered = filtered.filter(note => note.source === filterType);
+    }
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(note =>
+        note.text?.toLowerCase().includes(query) ||
+        note.metadata?.selectedText?.toLowerCase().includes(query) ||
+        note.metadata?.selectionContext?.toLowerCase().includes(query)
+      );
+    }
+
+    return filtered;
+  }, [notes, filterType, searchQuery]);
+
+  // Group filtered notes by source
   const groupedNotes = useMemo(() => {
-    return notes.reduce<Record<NoteSource, Note[]>>((acc, note) => {
+    return filteredNotes.reduce<Record<NoteSource, Note[]>>((acc, note) => {
       const list = acc[note.source] || [];
       list.push(note);
       acc[note.source] = list;
       return acc;
     }, {} as Record<NoteSource, Note[]>);
-  }, [notes]);
+  }, [filteredNotes]);
+
+  const noteCount = notes.length;
+  const filteredCount = filteredNotes.length;
 
   if (!isAuthenticated) {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-3 px-6 text-center">
         <div className="space-y-1.5">
-          <h3 className="text-sm font-semibold text-foreground">Sign in to save notes</h3>
+          <h3 className="text-sm font-semibold text-foreground">登录以保存笔记</h3>
           <p className="text-xs text-muted-foreground">
-            Highlight transcript moments and keep your takeaways in one place.
+            高亮字幕或聊天内容来记录笔记
           </p>
         </div>
         <Button
@@ -143,44 +216,123 @@ export function NotesPanel({
           className="rounded-full px-4"
           onClick={() => onSignInClick?.()}
         >
-          Sign in to save notes
+          登录
         </Button>
-      </div>
-    );
-  }
-
-  if (!notes.length && !editingNote) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center text-sm text-muted-foreground px-6 text-center gap-4">
-        <p>Your saved notes will appear here. Highlight transcript or chat text to take a note.</p>
-        {onAddNote && (
-          <Button
-            onClick={onAddNote}
-            variant="outline"
-            className="gap-2 rounded-xl border-dashed border-slate-300 bg-white/50 text-slate-600 hover:bg-white hover:text-slate-900"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add a note
-          </Button>
-        )}
       </div>
     );
   }
 
   return (
     <ScrollArea className="h-full">
-      <div className="p-4 space-y-5 w-full max-w-full overflow-hidden">
-        {/* Add Note Button */}
-        {!editingNote && onAddNote && (
-          <Button
-            onClick={onAddNote}
-            className="w-full gap-2 rounded-xl border border-dashed border-slate-300 bg-white/50 text-slate-600 shadow-sm hover:bg-white hover:text-slate-900 h-9 text-xs font-medium"
-            variant="outline"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add Note
-          </Button>
-        )}
+      <div className="p-4 space-y-4 w-full max-w-full overflow-hidden">
+        {/* Top Action Bar */}
+        <div className="flex flex-col gap-2">
+          {/* Search Bar */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder="搜索笔记..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 h-9 text-xs rounded-xl border-slate-200 bg-white/50 focus:bg-white"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-slate-100 rounded"
+              >
+                <X className="h-3 w-3 text-muted-foreground" />
+              </button>
+            )}
+          </div>
+
+          {/* Action Buttons Row */}
+          <div className="flex items-center gap-2">
+            {/* Export Button */}
+            {videoInfo && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={handleExport}
+                    disabled={isExporting || (!notes.length && !getLocalNotes(videoInfo.youtubeId).length)}
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl bg-white/50 border-slate-200 text-slate-600 hover:bg-white hover:text-slate-900 h-8 text-xs font-medium gap-1.5 shrink-0"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    导出
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <span className="text-xs">导出为 Markdown 文件</span>
+                </TooltipContent>
+              </Tooltip>
+            )}
+
+            {/* Filter Toggle */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={() => setShowFilters(!showFilters)}
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl bg-white/50 border-slate-200 text-slate-600 hover:bg-white hover:text-slate-900 h-8 w-8 p-0 shrink-0"
+                >
+                  <Filter className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <span className="text-xs">筛选笔记类型</span>
+              </TooltipContent>
+            </Tooltip>
+
+            {/* Add Note Button */}
+            {!editingNote && onAddNote && (
+              <Button
+                onClick={onAddNote}
+                className="flex-1 gap-2 rounded-xl border border-dashed border-slate-300 bg-white/50 text-slate-600 shadow-sm hover:bg-white hover:text-slate-900 h-8 text-xs font-medium"
+                variant="outline"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                添加笔记
+              </Button>
+            )}
+          </div>
+
+          {/* Filter Options (Expandable) */}
+          {showFilters && (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {[
+                { value: 'all' as FilterType, label: '全部' },
+                { value: 'transcript' as FilterType, label: '🎬 视频' },
+                { value: 'chat' as FilterType, label: '💬 对话' },
+                { value: 'custom' as FilterType, label: '✏️ 自定义' },
+                { value: 'takeaways' as FilterType, label: '🎯 要点' },
+              ].map((filter) => (
+                <button
+                  key={filter.value}
+                  onClick={() => setFilterType(filter.value)}
+                  className={cn(
+                    "px-2.5 py-1 text-xs rounded-lg transition-colors",
+                    filterType === filter.value
+                      ? "bg-purple-100 text-purple-700 font-medium"
+                      : "bg-white/50 text-slate-600 hover:bg-white"
+                  )}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Note Count */}
+          {(searchQuery || filterType !== 'all') && (
+            <div className="text-xs text-muted-foreground">
+              {filteredCount} / {noteCount} 条笔记
+            </div>
+          )}
+        </div>
 
         {/* Note Editor - shown when editing */}
         {editingNote && onSaveEditingNote && onCancelEditing && (
@@ -193,11 +345,28 @@ export function NotesPanel({
           />
         )}
 
+        {/* Empty State */}
+        {!filteredNotes.length && !editingNote && (
+          <div className="h-32 flex flex-col items-center justify-center text-sm text-muted-foreground text-center">
+            {searchQuery || filterType !== 'all' ? (
+              <p>没有找到匹配的笔记</p>
+            ) : (
+              <>
+                <p>你的笔记将显示在这里</p>
+                <p className="text-xs">高亮字幕或聊天内容来创建笔记</p>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Saved Notes - grouped by source */}
         {Object.entries(groupedNotes).map(([source, sourceNotes]) => (
           <div key={source} className="space-y-3">
-            <div className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground flex items-center gap-2">
               {getSourceLabel(source as NoteSource)}
+              <span className="text-[10px] px-1.5 py-0.5 bg-slate-100 rounded-full">
+                {sourceNotes.length}
+              </span>
             </div>
             <div className="space-y-2.5">
               {sourceNotes.map((note) => {
@@ -263,9 +432,12 @@ export function NotesPanel({
                   !isTranscriptNote && note.metadata?.transcript?.segmentIndex !== undefined;
 
                 return (
-                  <Card key={note.id} className="group p-3.5 bg-white hover:bg-neutral-50/60 border-none shadow-none transition-colors">
+                  <Card key={note.id} className="group relative p-3.5 bg-white hover:bg-neutral-50/60 border-none shadow-sm hover:shadow-md transition-all">
                     <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 space-y-2">
+                      <div
+                        className="flex-1 space-y-2 pr-8 cursor-pointer"
+                        onClick={() => handleEditClick(note)}
+                      >
                         {quoteText && (
                           <div className="border-l-2 border-primary/40 pl-3 py-1 rounded-r text-sm text-foreground/90 leading-relaxed">
                             <ReactMarkdown
@@ -292,28 +464,43 @@ export function NotesPanel({
                           </div>
                           {shouldShowSegmentInfo && note.metadata?.transcript && note.metadata.transcript.segmentIndex !== undefined && (
                             <span className="text-muted-foreground/80">
-                              Segment #{note.metadata.transcript.segmentIndex + 1}
+                              片段 #{note.metadata.transcript.segmentIndex + 1}
                             </span>
                           )}
                         </div>
                       </div>
-                      {onDeleteNote && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => onDeleteNote(note.id)}
-                              className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <span className="text-xs">Delete note</span>
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
+
+                      {/* Action Buttons - Always visible on hover */}
+                      <div className="absolute top-2 right-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {onEditNote && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditClick(note);
+                            }}
+                            className="h-7 w-7 text-muted-foreground hover:text-primary hover:bg-slate-100"
+                            title="编辑笔记"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                        {onDeleteNote && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteNote(note.id);
+                            }}
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-red-50"
+                            title="删除笔记"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </Card>
                 );

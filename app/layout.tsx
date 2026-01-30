@@ -3,6 +3,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from '@vercel/analytics/react';
+import { Agentation } from "agentation";
 import { AuthProvider } from '@/contexts/auth-context';
 import { UserMenu } from '@/components/user-menu';
 import { ToastProvider } from '@/components/toast-provider';
@@ -20,7 +21,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "LongCut - The best way to learn from long videos",
+  title: "Little universe - The best way to learn from long videos",
   description: "Smart video navigation that transforms long YouTube videos into topic-driven learning experiences",
   icons: {
     icon: "/Video_Play.svg",
@@ -47,7 +48,7 @@ export default function RootLayout({
                 >
                   <Image
                     src="/Video_Play.svg"
-                    alt="LongCut logo"
+                    alt="Little universe logo"
                     width={28}
                     height={28}
                     className="h-7 w-7"
@@ -60,14 +61,14 @@ export default function RootLayout({
                 </div>
               </div>
             </header>
-            <main className="flex-1 mt-8 px-2">
+            <main className="flex-1">
               {children}
             </main>
-            <Footer />
           </div>
           <ToastProvider />
         </AuthProvider>
         <Analytics />
+        {process.env.NODE_ENV === "development" && <Agentation />}
       </body>
     </html>
   );

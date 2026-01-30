@@ -6,7 +6,7 @@ import { z } from "zod";
 const enhancePayloadSchema = z.object({
   quote: z
     .string()
-    .min(12, "Quote is too short to enhance")
+    .min(1, "Quote is required")
     .max(2000, "Quote must be under 2,000 characters"),
 });
 
@@ -75,6 +75,7 @@ async function handler(req: NextRequest) {
   const parsed = enhancePayloadSchema.safeParse(body);
 
   if (!parsed.success) {
+    console.error('[Enhance API] Validation failed:', parsed.error.issues);
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message || "Invalid request" },
       { status: 400 }
@@ -89,6 +90,8 @@ async function handler(req: NextRequest) {
       { status: 400 }
     );
   }
+
+  console.log('[Enhance API] Processing quote:', quote.substring(0, 50) + '...');
 
   const prompt = `<task>
 <role>You are a meticulous transcript editor tasked with polishing noisy speech.</role>
@@ -129,12 +132,12 @@ async function handler(req: NextRequest) {
 }
 
 export const POST = withSecurity(handler, {
-  requireAuth: true,
+  requireAuth: false, // Allow anonymous users to enhance notes
   rateLimit: {
     windowMs: 60 * 1000,
-    maxRequests: 20,
+    maxRequests: 30,
   },
   maxBodySize: 32 * 1024,
   allowedMethods: ["POST"],
-  csrfProtection: true,
+  csrfProtection: false, // Disable CSRF for anonymous requests
 });

@@ -1,4 +1,4 @@
-export const getWelcomeSubject = () => "Welcome to LongCut";
+export const getWelcomeSubject = () => "Welcome to Little universe";
 
 export const getWelcomeHtmlBody = (fullName?: string | null) => {
   const greeting = fullName ? `Hey ${fullName},` : 'Hey,';
@@ -52,14 +52,14 @@ export const getWelcomeHtmlBody = (fullName?: string | null) => {
   <div class="content">
     <p>${greeting}</p>
 
-    <p>I'm Zara, one of the creators of <a href="https://longcut.ai/">LongCut</a>. I just wanted to say thanks for signing up.</p>
+    <p>I'm Zara, one of the creators of <a href="https://longcut.ai/">Little universe</a>. I just wanted to say thanks for signing up.</p>
 
-    <p>We built LongCut to help you learn better from long YouTube videos. Here's a <a href="https://www.youtube.com/watch?v=93vIBbZ88Fs">video</a> walking through how to use it.</p>
+    <p>We built Little universe to help you learn better from long YouTube videos. Here's a <a href="https://www.youtube.com/watch?v=93vIBbZ88Fs">video</a> walking through how to use it.</p>
 
     <p>If you have a second, I would love to hear from you on:</p>
 
     <ol>
-      <li>What are you using LongCut for</li>
+      <li>What are you using Little universe for</li>
       <li>What's your favorite feature</li>
       <li>Any suggestions/feedback</li>
     </ol>
@@ -72,7 +72,7 @@ export const getWelcomeHtmlBody = (fullName?: string | null) => {
 
   <div class="footer">
     <p>
-      LongCut - Don't take the shortcut in your learning; take the longcut.<br>
+      Little universe - Don't take the shortcut in your learning; take the longcut.<br>
       <a href="https://longcut.ai">longcut.ai</a>
     </p>
   </div>

@@ -69,7 +69,7 @@ function initializeStripe(): Stripe {
     apiVersion: '2024-10-28.acacia' as any,
     typescript: true,
     appInfo: {
-      name: 'LongCut',
+      name: 'Little universe',
       version: '1.0.0',
     },
   });
@@ -149,7 +149,7 @@ async function createPortalConfiguration(stripe: Stripe): Promise<void> {
   try {
     const configuration = await stripe.billingPortal.configurations.create({
       business_profile: {
-        headline: 'Manage your LongCut subscription',
+        headline: 'Manage your Little universe subscription',
         privacy_policy_url: `${appUrl}/privacy`,
         terms_of_service_url: `${appUrl}/terms`,
       },
@@ -268,7 +268,7 @@ async function updatePortalConfiguration(
   try {
     const configuration = await stripe.billingPortal.configurations.update(configId, {
       business_profile: {
-        headline: 'Manage your LongCut subscription',
+        headline: 'Manage your Little universe subscription',
         privacy_policy_url: `${appUrl}/privacy`,
         terms_of_service_url: `${appUrl}/terms`,
       },

@@ -71,6 +71,9 @@ function findClosestSegment(transcript: TranscriptSegment[], targetSeconds: numb
 }
 
 async function handler(request: NextRequest) {
+  // Check for user's provider preference from cookie
+  const cookieProvider = request.cookies.get('ai-provider')?.value;
+
   try {
     // Parse and validate request body
     const body = await request.json();
@@ -124,44 +127,45 @@ async function handler(request: NextRequest) {
       : '';
 
     const prompt = `<task>
-<role>You are an expert AI assistant for video transcripts. Prefer the provided transcript when the user asks about the video, but answer general knowledge questions directly.</role>${languageInstruction}
-<context>
+<role>You are a helpful AI assistant. You have access to a video transcript for video-specific questions, but you can also answer general knowledge questions using your own training.</role>${languageInstruction}
+
+<IMPORTANT_CONTEXT_UNDERSTANDING>
+<step name="Question Classification - CRITICAL">
+  <item>First, determine if the user's question is ABOUT the video content:</item>
+  <item>• VIDEO-RELATED: Questions about the video's content, topics discussed, speaker's words, timestamps in the video, "what did they say about X", "explain this from the video"</item>
+  <item>• GENERAL KNOWLEDGE: Questions about facts, definitions, explanations, current events, "who is the smartest", "explain quantum physics", "what's the capital of France"</item>
+</step>
+
+<step name="Response Strategy">
+  <item>For VIDEO-RELATED questions:</item>
+  <item>  - Use ONLY the transcript below</item>
+  <item>  - Cite timestamps in [MM:SS] format</item>
+  <item>  - If answer isn't in transcript, say "The transcript doesn't contain this information"</item>
+  <item>For GENERAL KNOWLEDGE questions:</item>
+  <item>  - IGNORE the transcript completely</item>
+  <item>  - Use your own knowledge to answer directly</item>
+  <item>  - Return empty timestamps array: []</item>
+  <item>  - Do NOT say "the transcript doesn't mention" - just answer the question</item>
+</step>
+</IMPORTANT_CONTEXT_UNDERSTANDING>
+
 <videoTopics>
 ${topicsContext || 'None provided'}
 </videoTopics>
+
 <conversationHistory><![CDATA[
 ${chatHistoryContext || 'No prior conversation'}
 ]]></conversationHistory>
-</context>
-<goal>Deliver concise, factual answers. Use the transcript when it is relevant to the question; otherwise respond with your best general knowledge.</goal>
-<instructions>
-  <step name="Assess Intent">
-    <item>Decide whether the user's question requires information from the transcript.</item>
-    <item>If the question is general knowledge or unrelated to the video, answer directly without forcing transcript references.</item>
-    <item>If the transcript lacks the requested information, clearly state that and return an empty timestamps array.</item>
-  </step>
-  <step name="Using The Transcript">
-    <item>When referencing the video, rely exclusively on the transcript.</item>
-    <item>Whenever you make a factual claim based on the transcript, append the exact supporting timestamp in brackets like [MM:SS] or [HH:MM:SS]. Never use numeric citation markers like [1].</item>
-    <item>List the same timestamps in the timestamps array, zero-padded and in the order they appear. Provide no more than five unique timestamps.</item>
-  </step>
-  <step name="AnswerFormatting">
-    <item>Respond in concise, complete sentences that mirror the transcript's language when applicable.</item>
-    <item>If the transcript lacks the requested information or was unnecessary, state that clearly and return an empty timestamps array.</item>
-  </step>
-</instructions>
-<validationChecklist>
-  <item>If you cited the transcript, does every factual statement have a supporting timestamp in brackets?</item>
-  <item>Are all timestamps valid moments within the transcript?</item>
-  <item>If the transcript was unnecessary or lacked the answer, did you state that and keep the timestamps array empty?</item>
-</validationChecklist>
-<outputFormat>Return strict JSON object: {"answer":"string","timestamps":["MM:SS"]}. No extra commentary.</outputFormat>
-<transcript><![CDATA[
+
+<transcriptForVideoQuestionsOnly><![CDATA[
 ${transcriptContext}
-]]></transcript>
+]]></transcriptForVideoQuestionsOnly>
+
 <userQuestion><![CDATA[
 ${message}
 ]]></userQuestion>
+
+<outputFormat>Return strict JSON object: {"answer":"string","timestamps":["MM:SS"]}. No extra commentary.</outputFormat>
 </task>`;
 
     const maxOutputTokens = 65536;
@@ -170,6 +174,7 @@ ${message}
 
     try {
       response = await generateAIResponse(prompt, {
+        provider: cookieProvider, // Use user's preferred provider from cookie
         temperature: 0.6,
         maxOutputTokens: Math.min(1024, maxOutputTokens),
         zodSchema: chatResponseSchema

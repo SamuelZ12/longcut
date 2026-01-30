@@ -15,6 +15,15 @@ const DEFAULT_LABELS = {
   generatingYourReels: "Generating your reels...",
 };
 
+// Pastel color palette from reference design
+const CATEGORY_COLORS = [
+  "bg-[#FF8A80]", // Coral
+  "bg-[#80CBC4]", // Mint green
+  "bg-[#F48FB1]", // Light pink
+  "bg-[#B39DDB]", // Lavender
+  "bg-[#81D4FA]", // Light blue
+];
+
 interface HighlightsPanelProps {
   topics: Topic[];
   selectedTopic: Topic | null;
@@ -89,12 +98,26 @@ export function HighlightsPanel({
     };
   }, [selectedLanguage, onRequestTranslation]);
 
+  // Get color for topic based on index
+  const getTopicColor = (index: number) => {
+    return CATEGORY_COLORS[index % CATEGORY_COLORS.length];
+  };
+
   return (
-    <Card className="overflow-hidden p-0 border-0 relative">
-      <div className={cn(
-        "p-2.5 bg-background rounded-b-3xl flex-shrink-0 transition-all duration-200",
-        isLoadingThemeTopics && "blur-[4px] opacity-50 pointer-events-none"
-      )}>
+    <Card
+      className="overflow-hidden p-0 border-0 relative"
+      style={{
+        background: "linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 30%, #90CAF9 70%, #64B5F6 100%)",
+      }}
+    >
+      <div
+        className={cn(
+          "p-2.5 flex-shrink-0 transition-all duration-200",
+          "bg-white/40 backdrop-blur-md rounded-2xl",
+          "border border-blue-100 shadow-lg",
+          isLoadingThemeTopics && "blur-[4px] opacity-50 pointer-events-none"
+        )}
+      >
         <VideoProgressBar
           videoDuration={videoDuration}
           currentTime={currentTime}
@@ -112,7 +135,7 @@ export function HighlightsPanel({
 
         <div className="mt-3 flex items-center justify-between">
           <div className="ml-2.5 flex items-center gap-1.5">
-            <span className="text-xs font-mono text-muted-foreground">
+            <span className="text-xs font-mono text-gray-700 font-medium">
               {formatDuration(currentTime)} / {formatDuration(videoDuration)}
             </span>
           </div>
@@ -121,7 +144,10 @@ export function HighlightsPanel({
               size="sm"
               variant={isPlayingAll ? "secondary" : "default"}
               onClick={onPlayAll}
-              className="h-7 text-xs"
+              className="h-8 px-4 text-xs text-white border-0 shadow-md rounded-full"
+              style={{
+                background: "linear-gradient(135deg, #81D4FA 0%, #4FC3F7 100%)",
+              }}
             >
               {isPlayingAll ? (
                 <>
@@ -142,8 +168,8 @@ export function HighlightsPanel({
       {/* Loading overlay */}
       {isLoadingThemeTopics && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 pointer-events-none">
-          <Loader2 className="h-5 w-5 animate-spin text-primary" />
-          <p className="text-sm font-medium text-foreground">
+          <Loader2 className="h-5 w-5 animate-spin text-blue-400" />
+          <p className="text-sm font-medium text-white drop-shadow-md">
             {translatedLabels.generatingYourReels}
           </p>
         </div>
