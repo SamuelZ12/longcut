@@ -211,10 +211,10 @@ export const RATE_LIMITS = {
     maxRequests: 10 // 10 messages per minute
   },
 
-  // Authenticated users (legacy - kept for backwards compatibility)
+  // Authenticated users - MVP: Very permissive limits
   AUTH_GENERATION: {
-    windowMs: 60 * 60 * 1000, // 1 hour
-    maxRequests: 20 // 20 generations per hour
+    windowMs: 60 * 1000, // 1 minute
+    maxRequests: 500 // MVP: Very high limit for development
   },
   AUTH_VIDEO_GENERATION: {
     windowMs: 24 * 60 * 60 * 1000, // 24 hours

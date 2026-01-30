@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { createTranscriptExport, type TranscriptExportFormat, type TranscriptExportMode } from '@/lib/transcript-export';
-import { isProSubscriptionActive, type SubscriptionStatusResponse } from './use-subscription';
+// MVP: Subscription checks removed - all logged-in users can export
 import type { TranscriptSegment, Topic, VideoInfo, TranslationRequestHandler } from '@/lib/types';
 import type { BulkTranslationHandler } from './use-translation';
 
@@ -13,9 +13,7 @@ interface UseTranscriptExportOptions {
   videoInfo: VideoInfo | null;
   user: any;
   hasSpeakerData: boolean;
-  subscriptionStatus: SubscriptionStatusResponse | null;
-  isCheckingSubscription: boolean;
-  fetchSubscriptionStatus: (options?: { force?: boolean }) => Promise<SubscriptionStatusResponse | null>;
+  // MVP: Subscription props removed
   onAuthRequired: () => void;
   onRequestTranslation: TranslationRequestHandler;
   onBulkTranslation: BulkTranslationHandler;
@@ -29,9 +27,7 @@ export function useTranscriptExport({
   videoInfo,
   user,
   hasSpeakerData,
-  subscriptionStatus,
-  isCheckingSubscription,
-  fetchSubscriptionStatus,
+  // MVP: Subscription destructuring removed
   onAuthRequired,
   onBulkTranslation,
   translationCache,
@@ -86,30 +82,7 @@ export function useTranscriptExport({
       return;
     }
 
-    const status = await fetchSubscriptionStatus();
-    if (!status) {
-      return;
-    }
-
-    if (status.tier !== 'pro') {
-      setShowExportUpsell(true);
-      return;
-    }
-
-    if (!isProSubscriptionActive(status)) {
-      setExportDisableMessage('Your subscription is not active. Visit billing to reactivate and continue exporting transcripts.');
-      setExportErrorMessage(null);
-      setIsExportDialogOpen(true);
-      return;
-    }
-
-    if (status.usage.totalRemaining <= 0) {
-      setExportDisableMessage("You've hit your export limit. Purchase a top-up or wait for your cycle reset.");
-      setExportErrorMessage(null);
-      setIsExportDialogOpen(true);
-      return;
-    }
-
+    // MVP: Allow all logged-in users to export without subscription checks
     setExportDisableMessage(null);
     setExportErrorMessage(null);
     setIsExportDialogOpen(true);
@@ -118,7 +91,6 @@ export function useTranscriptExport({
     transcript.length,
     user,
     onAuthRequired,
-    fetchSubscriptionStatus,
   ]);
 
   const handleConfirmExport = useCallback(async () => {
@@ -127,27 +99,7 @@ export function useTranscriptExport({
       return;
     }
 
-    const status = await fetchSubscriptionStatus();
-    if (!status) {
-      setExportErrorMessage('Unable to verify your subscription. Please try again.');
-      return;
-    }
-
-    if (status.tier !== 'pro') {
-      setShowExportUpsell(true);
-      setIsExportDialogOpen(false);
-      return;
-    }
-
-    if (!isProSubscriptionActive(status)) {
-      setExportDisableMessage('Your subscription is not active. Visit billing to reactivate and continue exporting transcripts.');
-      return;
-    }
-
-    if (status.usage.totalRemaining <= 0) {
-      setExportDisableMessage("You've hit your export limit. Purchase a top-up or wait for your cycle reset.");
-      return;
-    }
+    // MVP: Skip subscription checks - allow all logged-in users to export
 
     setIsExportingTranscript(true);
     setExportErrorMessage(null);
@@ -163,12 +115,12 @@ export function useTranscriptExport({
         const segmentsToTranslate: { index: number; text: string }[] = [];
 
         transcript.forEach((segment, index) => {
-           const cacheKey = `transcript:${index}:${targetLanguage}`;
-           if (translationCache.has(cacheKey)) {
-             translations[index] = translationCache.get(cacheKey)!;
-           } else {
-             segmentsToTranslate.push({ index, text: segment.text });
-           }
+          const cacheKey = `transcript:${index}:${targetLanguage}`;
+          if (translationCache.has(cacheKey)) {
+            translations[index] = translationCache.get(cacheKey)!;
+          } else {
+            segmentsToTranslate.push({ index, text: segment.text });
+          }
         });
 
         // 2. Request missing translations using bulk API for faster processing
@@ -215,7 +167,7 @@ export function useTranscriptExport({
       toast.success('Transcript export started');
       setIsExportDialogOpen(false);
       setExportDisableMessage(null);
-      await fetchSubscriptionStatus({ force: true });
+      // MVP: Subscription status refresh removed
     } catch (error) {
       console.error('Transcript export failed:', error);
       const message =
@@ -227,7 +179,7 @@ export function useTranscriptExport({
     }
   }, [
     transcript,
-    fetchSubscriptionStatus,
+
     exportFormat,
     exportMode,
     targetLanguage,
@@ -260,39 +212,10 @@ export function useTranscriptExport({
       };
     }
 
-    if (isCheckingSubscription) {
-      return {
-        disabled: true,
-        isLoading: true,
-        tooltip: 'Checking export availability…',
-      };
-    }
-
+    // MVP: Only require login, no subscription checks
     if (!user) {
       return {
-        badgeLabel: 'Pro',
         tooltip: 'Sign in to export transcripts',
-      };
-    }
-
-    if (subscriptionStatus && subscriptionStatus.tier !== 'pro') {
-      return {
-        badgeLabel: 'Pro',
-        tooltip: 'Upgrade to Pro to export transcripts',
-      };
-    }
-
-    if (subscriptionStatus && !isProSubscriptionActive(subscriptionStatus)) {
-      return {
-        badgeLabel: 'Pro',
-        tooltip: 'Reactivate your subscription to export transcripts',
-      };
-    }
-
-    if (subscriptionStatus && subscriptionStatus.usage.totalRemaining <= 0) {
-      return {
-        badgeLabel: 'Pro',
-        tooltip: "You've hit your export limit. Purchase a top-up or wait for reset.",
       };
     }
 
@@ -303,9 +226,7 @@ export function useTranscriptExport({
     videoId,
     transcript.length,
     isExportingTranscript,
-    isCheckingSubscription,
     user,
-    subscriptionStatus,
   ]);
 
   return {

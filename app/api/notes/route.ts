@@ -50,8 +50,12 @@ async function handler(req: NextRequest) {
     const youtubeId = searchParams.get('youtubeId');
     const videoIdParam = searchParams.get('videoId');
 
+    // Debug logging
+    console.log('📝 [GET /api/notes] Request params:', { youtubeId, videoIdParam, url: req.url });
+
     try {
       const validated = getNotesQuerySchema.parse({ youtubeId, videoId: videoIdParam });
+      console.log('✅ [GET /api/notes] Validation passed:', validated);
 
       let targetVideoId: string | undefined;
 
@@ -94,13 +98,17 @@ async function handler(req: NextRequest) {
       return NextResponse.json({ notes });
     } catch (error) {
       if (error instanceof z.ZodError) {
+        console.error('❌ [GET /api/notes] Zod validation error:', {
+          issues: error.issues,
+          formattedError: formatValidationError(error)
+        });
         return NextResponse.json(
           { error: 'Validation failed', details: formatValidationError(error) },
           { status: 400 }
         );
       }
 
-      console.error('Error fetching notes:', error);
+      console.error('❌ [GET /api/notes] Unexpected error:', error);
       return NextResponse.json(
         { error: 'Failed to fetch notes' },
         { status: 500 }
