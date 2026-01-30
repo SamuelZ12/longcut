@@ -2,9 +2,9 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
-  RightColumnTabs,
-  type RightColumnTabsHandle,
-} from "@/components/right-column-tabs";
+  RightColumnPanel,
+  type RightColumnPanelHandle,
+} from "@/components/right-column-panel";
 import { YouTubePlayer } from "@/components/youtube-player";
 import { HighlightsPanel } from "@/components/highlights-panel";
 import { ThemeSelector } from "@/components/theme-selector";
@@ -41,6 +41,17 @@ import { useModePreference } from "@/lib/hooks/use-mode-preference";
 import { useTranslation } from "@/lib/hooks/use-translation";
 import { useSubscription } from "@/lib/hooks/use-subscription";
 import { useTranscriptExport } from "@/lib/hooks/use-transcript-export";
+import { HistorySidebar, useWatchHistory } from "@/components/history-sidebar";
+import { AIAssistantFloating } from "@/components/ai-assistant-floating";
+import {
+  useLocalNotes,
+  getYouTubeThumbnail,
+} from "@/lib/hooks/use-local-notes";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
 
 // Page state for better UX
 type PageState = "IDLE" | "ANALYZING_NEW" | "LOADING_CACHED";
@@ -293,7 +304,7 @@ export default function AnalyzePage() {
   const [processingStartTime, setProcessingStartTime] = useState<number | null>(
     null,
   );
-  const rightColumnTabsRef = useRef<RightColumnTabsHandle>(null);
+  const rightColumnTabsRef = useRef<RightColumnPanelHandle>(null);
   const abortManager = useRef(new AbortManager());
   const selectedThemeRef = useRef<string | null>(null);
   const seoPathRef = useRef<string | null>(null);
@@ -322,6 +333,7 @@ export default function AnalyzePage() {
   const [, setIsGeneratingTakeaways] = useState<boolean>(false);
   const [, setTakeawaysError] = useState<string>("");
   const [showChatTab, setShowChatTab] = useState<boolean>(false);
+  const [isAIChatOpen, setIsAIChatOpen] = useState<boolean>(false);
 
   // Cached suggested questions
   const [cachedSuggestedQuestions, setCachedSuggestedQuestions] = useState<
@@ -500,6 +512,7 @@ export default function AnalyzePage() {
 
   // Centralized playback request functions
   const requestSeek = useCallback((time: number) => {
+    console.log('[Page] requestSeek called with:', time);
     setPlaybackCommand({ type: "SEEK", time });
   }, []);
 
@@ -1753,6 +1766,7 @@ export default function AnalyzePage() {
     }
 
     // Request seek through centralized command system
+    console.log('[Page] calling requestSeek with:', seconds);
     requestSeek(seconds);
   };
 
@@ -2070,11 +2084,11 @@ export default function AnalyzePage() {
     //   .finally(() => setIsLoadingNotes(false));
   }, [videoId, user]);
 
-  // Auto-switch to Chat tab when Explain is triggered from transcript
+  // Auto-open AI Chat when Explain is triggered from transcript
   useEffect(() => {
     const handleExplainFromSelection = () => {
-      // Switch to chat tab when explain is triggered
-      rightColumnTabsRef.current?.switchToChat?.();
+      // Open floating AI chat when explain is triggered
+      setIsAIChatOpen(true);
     };
 
     window.addEventListener(
@@ -2334,38 +2348,49 @@ export default function AnalyzePage() {
       )}
 
       {videoId && topics.length > 0 && pageState === "IDLE" && (
-        <div className="mx-auto w-full max-w-7xl px-5 pb-5 pt-0">
+        <div className="flex-1 w-full h-[calc(100vh-4rem)] overflow-hidden">
           {error && (
-            <div className="mb-6 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-medium text-red-600 shadow-sm">
+            <div className="absolute top-0 left-0 right-0 z-10 mb-6 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-medium text-red-600 shadow-sm mx-4 mt-2">
               {error}
             </div>
           )}
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-            {/* Left Column - Video (2/3 width) */}
-            <div className="lg:col-span-2">
-              <div
-                className="sticky top-[6.5rem] space-y-3.5"
-                id="video-container"
-              >
-                <YouTubePlayer
-                  videoId={videoId}
-                  selectedTopic={selectedTopic}
-                  playbackCommand={playbackCommand}
-                  onCommandExecuted={clearPlaybackCommand}
-                  topics={topics}
-                  onTopicSelect={handleTopicSelect}
-                  onTimeUpdate={handleTimeUpdate}
-                  transcript={transcript}
-                  isPlayingAll={isPlayingAll}
-                  playAllIndex={playAllIndex}
-                  onTogglePlayAll={handleTogglePlayAll}
-                  setPlayAllIndex={memoizedSetPlayAllIndex}
-                  setIsPlayingAll={memoizedSetIsPlayingAll}
-                  renderControls={false}
-                  onDurationChange={setVideoDuration}
-                  selectedLanguage={selectedLanguage}
-                  onRequestTranslation={translateWithContext}
-                />
+          <ResizablePanelGroup direction="horizontal" className="h-full">
+            {/* Left Column - History Sidebar (collapsible) */}
+            <ResizablePanel
+              defaultSize={15}
+              minSize={5}
+              maxSize={25}
+              collapsible
+              collapsedSize={3}
+            >
+              <HistorySidebar currentVideoId={videoId} />
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+
+            {/* Center Column - Video & Highlights (main content) */}
+            <ResizablePanel defaultSize={55} minSize={30}>
+              <div className="h-full overflow-y-auto p-4 space-y-4">
+                <div id="video-container">
+                  <YouTubePlayer
+                    videoId={videoId}
+                    selectedTopic={selectedTopic}
+                    playbackCommand={playbackCommand}
+                    onCommandExecuted={clearPlaybackCommand}
+                    topics={topics}
+                    onTopicSelect={handleTopicSelect}
+                    onTimeUpdate={handleTimeUpdate}
+                    transcript={transcript}
+                    isPlayingAll={isPlayingAll}
+                    playAllIndex={playAllIndex}
+                    onTogglePlayAll={handleTogglePlayAll}
+                    setPlayAllIndex={memoizedSetPlayAllIndex}
+                    setIsPlayingAll={memoizedSetIsPlayingAll}
+                    renderControls={false}
+                    onDurationChange={setVideoDuration}
+                    selectedLanguage={selectedLanguage}
+                    onRequestTranslation={translateWithContext}
+                  />
+                </div>
                 {(themes.length > 0 ||
                   isLoadingThemeTopics ||
                   themeError ||
@@ -2400,19 +2425,13 @@ export default function AnalyzePage() {
                   onRequestTranslation={translateWithContext}
                 />
               </div>
-            </div>
+            </ResizablePanel>
+            <ResizableHandle withHandle />
 
-            {/* Right Column - Tabbed Interface (1/3 width) */}
-            <div className="lg:col-span-1">
-              <div
-                className="sticky top-[6.5rem]"
-                id="right-column-container"
-                style={{
-                  height: transcriptHeight,
-                  maxHeight: transcriptHeight,
-                }}
-              >
-                <RightColumnTabs
+            {/* Right Column - Transcript/Notes Panel */}
+            <ResizablePanel defaultSize={30} minSize={20}>
+              <div className="h-full" id="right-column-container">
+                <RightColumnPanel
                   ref={rightColumnTabsRef}
                   transcript={transcript}
                   selectedTopic={selectedTopic}
@@ -2424,8 +2443,6 @@ export default function AnalyzePage() {
                   videoTitle={videoInfo?.title}
                   videoInfo={videoInfo}
                   onCitationClick={handleCitationClick}
-                  showChatTab={showChatTab}
-                  cachedSuggestedQuestions={cachedSuggestedQuestions}
                   notes={notes}
                   onSaveNote={handleSaveNote}
                   onTakeNoteFromSelection={handleTakeNoteFromSelection}
@@ -2437,7 +2454,7 @@ export default function AnalyzePage() {
                   onRequestSignIn={handleAuthRequired}
                   selectedLanguage={selectedLanguage}
                   onRequestTranslation={translateWithContext}
-                  onLanguageChange={(langCode) => {
+                  onLanguageChange={(langCode: string | null) => {
                     // Check if this is a request for a native transcript
                     const availableLanguages =
                       videoInfo?.availableLanguages || [];
@@ -2462,8 +2479,8 @@ export default function AnalyzePage() {
                   exportButtonState={exportButtonState}
                 />
               </div>
-            </div>
-          </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </div>
       )}
 
@@ -2517,6 +2534,29 @@ export default function AnalyzePage() {
         onOpenChange={setShowExportUpsell}
         onUpgradeClick={handleUpgradeClick}
       />
+
+      {/* Floating AI Assistant */}
+      {videoId && topics.length > 0 && (
+        <AIAssistantFloating
+          transcript={transcript}
+          topics={topics}
+          videoId={videoId}
+          videoTitle={videoInfo?.title}
+          videoInfo={videoInfo}
+          onCitationClick={handleCitationClick}
+          onTimestampClick={handleTimestampClick}
+          cachedSuggestedQuestions={cachedSuggestedQuestions}
+          onSaveNote={handleSaveNote}
+          onTakeNoteFromSelection={handleTakeNoteFromSelection}
+          selectedLanguage={selectedLanguage}
+          translationCache={translationCache}
+          onRequestTranslation={translateWithContext}
+          isAuthenticated={!!user}
+          onRequestSignIn={handleAuthRequired}
+          open={isAIChatOpen}
+          onOpenChange={setIsAIChatOpen}
+        />
+      )}
     </div>
   );
 }

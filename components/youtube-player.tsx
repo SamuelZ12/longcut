@@ -218,8 +218,15 @@ export function YouTubePlayer({
       switch (playbackCommand.type) {
         case 'SEEK':
           if (playbackCommand.time !== undefined) {
+            console.log('[YouTubePlayer] SEEK command:', playbackCommand.time, 'player ready:', playerReady);
+            isSeekingRef.current = true;
             playerRef.current.seekTo(playbackCommand.time, true);
-            playerRef.current.playVideo();
+            // Don't auto-play on seek - let user control playback
+            // playerRef.current.playVideo();
+            // Clear seeking flag after a short delay
+            setTimeout(() => {
+              isSeekingRef.current = false;
+            }, 200);
           }
           break;
 
@@ -401,6 +408,7 @@ export function YouTubePlayer({
 
 
   const handleSeek = (time: number) => {
+    console.log('[YouTubePlayer] handleSeek:', time, 'player exists:', !!playerRef.current);
     playerRef.current?.seekTo(time, true);
     setCurrentTime(time);
   };

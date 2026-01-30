@@ -560,6 +560,7 @@ export function TranscriptViewer({
     // But usually click implies mousedown and mouseup at same location.
 
     // Seek to the start of the segment
+    console.log('[TranscriptViewer] handleSegmentClick:', segment.start, segment.text.substring(0, 50));
     onTimestampClick(segment.start);
   };
 

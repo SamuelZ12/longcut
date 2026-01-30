@@ -47,6 +47,7 @@
     "react": "19.1.2",
     "react-dom": "19.1.2",
     "react-markdown": "^10.1.0",
+    "react-resizable-panels": "^4.5.5",
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
     "stripe": "^19.2.0",
