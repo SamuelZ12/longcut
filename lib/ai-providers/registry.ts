@@ -82,14 +82,42 @@ function isRetryableError(error: unknown): boolean {
   if (!error) return false;
   const message = error instanceof Error ? error.message : String(error);
   const lowerMessage = message.toLowerCase();
-  return (
-    lowerMessage.includes('service unavailable') ||
-    lowerMessage.includes('503') ||
-    lowerMessage.includes('502') ||
-    lowerMessage.includes('504') ||
-    lowerMessage.includes('timeout') ||
-    lowerMessage.includes('overload')
-  );
+  
+  // HTTP status codes
+  if (lowerMessage.includes('503') || 
+      lowerMessage.includes('502') || 
+      lowerMessage.includes('504') ||
+      lowerMessage.includes('429')) {
+    return true;
+  }
+  
+  // Service errors
+  if (lowerMessage.includes('service unavailable') ||
+      lowerMessage.includes('timeout') ||
+      lowerMessage.includes('overload') ||
+      lowerMessage.includes('rate limit') ||
+      lowerMessage.includes('too many requests') ||
+      lowerMessage.includes('temporarily unavailable') ||
+      lowerMessage.includes('connection error') ||
+      lowerMessage.includes('econnreset') ||
+      lowerMessage.includes('etimedout') ||
+      lowerMessage.includes('socket hang up')) {
+    return true;
+  }
+  
+  // Configuration errors that might work with another provider
+  if (lowerMessage.includes('api key') && 
+      (lowerMessage.includes('invalid') || lowerMessage.includes('expired') || lowerMessage.includes('revoked'))) {
+    return true;
+  }
+  
+  // JSON parsing errors (model might return invalid JSON)
+  if (lowerMessage.includes('json') && 
+      (lowerMessage.includes('parse') || lowerMessage.includes('invalid') || lowerMessage.includes('unexpected'))) {
+    return true;
+  }
+  
+  return false;
 }
 
 function getFallbackProvider(currentKey: ProviderKey): ProviderKey | null {

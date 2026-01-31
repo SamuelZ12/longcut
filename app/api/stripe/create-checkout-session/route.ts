@@ -175,6 +175,13 @@ async function handler(req: NextRequest) {
 
     // Create Stripe Checkout session
     const stripe = getStripeClient();
+    if (!stripe) {
+      return NextResponse.json(
+        { error: 'Payment system not configured' },
+        { status: 503 }
+      );
+    }
+
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       mode: mode,

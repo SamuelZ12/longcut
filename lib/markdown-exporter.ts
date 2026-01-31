@@ -27,7 +27,7 @@ export function generateMarkdown(data: ExportData): string {
   lines.push(`| **🎬 视频标题** | ${videoInfo.title || 'N/A'} |`);
   lines.push(`| **👤 作者/频道** | ${videoInfo.author || 'N/A'} |`);
   lines.push(`| **⏱️ 总时长** | ${formatDuration(videoInfo.duration || 0)} |`);
-  lines.push(`| **🔗 视频链接** | [https://youtube.com/watch?v=${videoInfo.youtubeId}](https://youtube.com/watch?v=${videoInfo.youtubeId}) |`);
+  lines.push(`| **🔗 视频链接** | [https://youtube.com/watch?v=${videoInfo.videoId}](https://youtube.com/watch?v=${videoInfo.videoId}) |`);
   lines.push(`| **📝 导出时间** | ${new Date(exportDate).toLocaleString('zh-CN')} |`);
   lines.push(`| **📌 笔记数量** | ${notes.length} 条 |`);
   lines.push('');
@@ -51,11 +51,11 @@ export function generateMarkdown(data: ExportData): string {
       lines.push('');
 
       transcriptNotes.forEach((note, index) => {
-        const timestamp = note.metadata?.timestamp
-          ? `(${formatDuration(note.metadata.timestamp)})`
+        const timestamp = note.metadata?.transcript?.start
+          ? `(${formatDuration(note.metadata.transcript.start)})`
           : '';
-        const segmentStart = note.metadata?.segmentStart
-          ? ` [${formatDuration(note.metadata.segmentStart)}]`
+        const segmentStart = note.metadata?.transcript?.end
+          ? ` [${formatDuration(note.metadata.transcript.end)}]`
           : '';
 
         lines.push(`#### ${index + 1}. ${timestamp}${segmentStart}`);
@@ -98,8 +98,8 @@ export function generateMarkdown(data: ExportData): string {
       lines.push('');
 
       customNotes.forEach((note, index) => {
-        const timeStr = note.metadata?.timestamp
-          ? `[${formatDuration(note.metadata.timestamp)}]`
+        const timeStr = note.metadata?.transcript?.start
+          ? `[${formatDuration(note.metadata.transcript.start)}]`
           : `[${new Date(note.createdAt).toLocaleString('zh-CN')}]`;
 
         lines.push(`#### ${index + 1}. ${timeStr}`);
@@ -139,15 +139,13 @@ export function generateMarkdown(data: ExportData): string {
     };
 
     topics.forEach((topic, index) => {
-      const color = topic.color || '#81D4FA';
-      const label = colorLabels[color] || '📌';
+      const color = (topic as any).color || '#81D4FA';
+      const label = colorLabels[color as keyof typeof colorLabels] || '📌';
 
       lines.push(`${index + 1}. **${label} [${formatDuration(topic.segments[0]?.start || 0)} - ${formatDuration(topic.segments[topic.segments.length - 1]?.end || 0)}]** ${topic.title}`);
 
-      if (topic.quotes && topic.quotes.length > 0) {
-        topic.quotes.slice(0, 2).forEach(quote => {
-          lines.push(`   > "${quote.text}"`);
-        });
+      if (topic.quote) {
+        lines.push(`   > "${topic.quote.text}"`);
       }
 
       if (topic.keywords && topic.keywords.length > 0) {

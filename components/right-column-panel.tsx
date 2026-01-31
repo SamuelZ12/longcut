@@ -193,13 +193,13 @@ export const RightColumnPanel = forwardRef<
           currentTime={currentTime}
           onTimestampClick={onTimestampClick}
           onAddNote={onAddNote}
-          videoInfo={videoInfo ? {
+videoInfo={videoInfo ? {
             youtubeId: videoId,
             title: videoInfo.title,
             author: videoInfo.author,
-            duration: videoInfo.duration,
+            duration: videoInfo.duration ?? undefined,
             description: videoInfo.description,
-            thumbnailUrl: videoInfo.thumbnailUrl
+            thumbnailUrl: videoInfo.thumbnail
           } : null}
           topics={topics}
         />
@@ -218,7 +218,11 @@ export const RightColumnPanel = forwardRef<
                 availableLanguages={availableLanguages}
                 currentSourceLanguage={currentSourceLanguage}
                 isAuthenticated={isAuthenticated}
-                onTabSwitch={setActiveTab}
+                onTabSwitch={(tab) => {
+                  if (tab === "transcript" || tab === "notes") {
+                    setActiveTab(tab);
+                  }
+                }}
                 onLanguageChange={onLanguageChange}
                 onRequestSignIn={onRequestSignIn}
               />

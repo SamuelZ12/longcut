@@ -118,10 +118,11 @@ export class RateLimiter {
     const windowStart = now - config.windowMs;
 
     try {
-      // First, clean up old entries
+      // First, clean up old entries for this specific key only (not full table)
       await supabase
         .from('rate_limits')
         .delete()
+        .eq('key', rateLimitKey)
         .lt('timestamp', new Date(windowStart).toISOString());
 
       // Count recent requests

@@ -69,7 +69,7 @@ function initializeStripe(): Stripe {
 /**
  * Find the Little universe Pro product
  */
-async function findLittle universeProProduct(stripe: Stripe): Promise<Stripe.Product | null> {
+async function findLittleUniverseProProduct(stripe: Stripe): Promise<Stripe.Product | null> {
   try {
     const products = await stripe.products.list({ limit: 100 });
     const proProduct = products.data.find(
@@ -137,7 +137,7 @@ async function main() {
 
   // Find the Little universe Pro product
   console.log('🔍 Searching for Little universe Pro product...\n');
-  const product = await findLittle universeProProduct(stripe);
+  const product = await findLittleUniverseProProduct(stripe);
 
   if (!product) {
     console.error('❌ Error: Could not find Little universe Pro product');

@@ -55,6 +55,13 @@ async function handler(req: NextRequest) {
 
     // Create Stripe billing portal session
     const stripe = getStripeClient();
+    if (!stripe) {
+      return NextResponse.json(
+        { error: 'Payment system not configured' },
+        { status: 503 }
+      );
+    }
+
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: profile.stripe_customer_id,
       return_url: `${appUrl}/settings`,

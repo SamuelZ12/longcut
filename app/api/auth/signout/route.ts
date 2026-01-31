@@ -1,8 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
+import { withSecurity } from '@/lib/security-middleware'
+import type { NextRequest } from 'next/server'
 
-export async function POST() {
+async function handler(req: NextRequest) {
   const supabase = await createClient()
   
   // Sign out server-side
@@ -23,3 +25,9 @@ export async function POST() {
   
   return response
 }
+
+export const POST = withSecurity(handler, {
+  requireAuth: true,
+  csrfProtection: true,
+  allowedMethods: ['POST']
+})

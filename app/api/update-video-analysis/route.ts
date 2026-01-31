@@ -38,25 +38,46 @@ async function handler(req: NextRequest) {
     }
 
     // Use secure update function with ownership verification
-    const { data: result, error: updateError } = await supabase
+    // Note: The function returns TABLE (success boolean, video_id uuid)
+    // which returns as an array of rows, not a single object
+    const { data: resultRows, error: updateError } = await supabase
       .rpc('update_video_analysis_secure', {
         p_youtube_id: videoId,
         p_user_id: user.id,
         p_summary: summary ?? null,
         p_suggested_questions: suggestedQuestions ?? null
-      })
-      .single<UpdateResult>();
+      });
 
     if (updateError) {
-      console.error('Error updating video analysis:', updateError);
+      console.error('Error updating video analysis:', {
+        message: updateError.message,
+        details: updateError.details,
+        hint: updateError.hint,
+        code: updateError.code,
+        videoId,
+        userId: user.id
+      });
       return NextResponse.json(
-        { error: 'Failed to update video analysis' },
+        { error: 'Failed to update video analysis', details: updateError.message },
+        { status: 500 }
+      );
+    }
+
+    // The function returns a table (array of rows), get the first result
+    const result = Array.isArray(resultRows) && resultRows.length > 0
+      ? resultRows[0] as UpdateResult
+      : null;
+
+    if (!result) {
+      console.error('No result returned from update_video_analysis_secure');
+      return NextResponse.json(
+        { error: 'Failed to update video analysis: No result' },
         { status: 500 }
       );
     }
 
     // Check if update was authorized
-    if (!result?.success) {
+    if (!result.success) {
       return NextResponse.json(
         { error: 'Not authorized to update this video analysis' },
         { status: 403 }

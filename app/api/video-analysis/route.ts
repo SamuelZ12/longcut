@@ -127,7 +127,8 @@ async function handler(req: NextRequest) {
       cachedVideo = data ?? null;
     }
 
-    const isCachedAnalysis = Boolean(cachedVideo?.topics);
+    // Check if we have valid cached topics (must be non-empty array)
+    const isCachedAnalysis = Array.isArray(cachedVideo?.topics) && cachedVideo.topics.length > 0;
 
     let generationDecision: GenerationDecision | null = null;
     let alreadyCountedThisPeriod = false;

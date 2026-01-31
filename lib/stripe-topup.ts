@@ -39,6 +39,12 @@ export async function extractTopupValuesFromSession(
   const stripe = getStripeClient();
 
   try {
+    // If Stripe is not configured, use defaults
+    if (!stripe) {
+      console.warn('Stripe not configured, using default top-up values');
+      return { credits: DEFAULT_CREDITS, amountCents: DEFAULT_AMOUNT_CENTS };
+    }
+
     const sessionWithItems =
       session.line_items?.data?.length && session.line_items.data[0]?.price
         ? session

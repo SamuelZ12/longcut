@@ -146,14 +146,39 @@ export function NotesPanel({
       // Get local notes for this video
       const localNotes = getLocalNotes(videoInfo.youtubeId);
 
+      // Convert cloud notes to LocalNote format
+      const cloudNotesAsLocal: LocalNote[] = notes.map(note => ({
+        id: note.id,
+        youtubeId: videoInfo.youtubeId,
+        source: note.source,
+        sourceId: note.sourceId || undefined,
+        text: note.text,
+        metadata: note.metadata || undefined,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt,
+        synced: true
+      }));
+
       // Combine with displayed notes (removing duplicates)
-      const allNotes = [
-        ...notes,
-        ...localNotes.filter(ln => !notes.find(n => n.id === ln.id))
+      const allNotes: LocalNote[] = [
+        ...cloudNotesAsLocal,
+        ...localNotes.filter(ln => !cloudNotesAsLocal.find(n => n.id === ln.id))
       ];
 
-      // Export to markdown
-      await exportNotesToMarkdown(videoInfo, allNotes, topics);
+      // Export to markdown - convert videoInfo to VideoInfo format
+      const exportVideoInfo = videoInfo ? {
+        videoId: videoInfo.youtubeId,
+        youtubeId: videoInfo.youtubeId,
+        title: videoInfo.title || '未命名视频',
+        author: videoInfo.author || '未知作者',
+        thumbnail: videoInfo.thumbnailUrl || '',
+        duration: videoInfo.duration || 0,
+        description: videoInfo.description
+      } : null;
+      
+      if (exportVideoInfo) {
+        await exportNotesToMarkdown(exportVideoInfo, allNotes, topics);
+      }
     } catch (error) {
       console.error('Export failed:', error);
     } finally {

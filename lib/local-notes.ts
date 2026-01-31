@@ -65,7 +65,7 @@ export function saveLocalNote(
 ): LocalNote {
   try {
     const data = localStorage.getItem(STORAGE_KEY);
-    let parsed: LocalNoteData = data ? JSON.parse(data) : { version: STORAGE_VERSION, notes: [] };
+    const parsed: LocalNoteData = data ? JSON.parse(data) : { version: STORAGE_VERSION, notes: [] };
 
     const now = new Date().toISOString();
 

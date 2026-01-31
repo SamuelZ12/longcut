@@ -23,6 +23,16 @@ async function handler(req: NextRequest) {
 
   const supabase = createServiceRoleClient();
   const stripe = getStripeClient();
+
+  // Stripe not configured - webhooks disabled
+  if (!stripe) {
+    console.error('❌ Stripe is not configured - webhook processing disabled');
+    return NextResponse.json(
+      { error: 'Payment system not configured' },
+      { status: 503 }
+    );
+  }
+
   let eventId: string | null = null;
   let eventLocked = false;
 

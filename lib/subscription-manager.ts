@@ -545,6 +545,13 @@ export async function createOrRetrieveStripeCustomer(
   userId: string,
   email: string
 ): Promise<{ customerId: string; error?: string }> {
+  const stripe = getStripeClient();
+
+  // Stripe not configured - payment features disabled
+  if (!stripe) {
+    return { customerId: '', error: 'STRIPE_NOT_CONFIGURED' };
+  }
+
   const supabase = await createClient();
 
   const { data: profile } = await supabase
@@ -558,7 +565,6 @@ export async function createOrRetrieveStripeCustomer(
   }
 
   try {
-    const stripe = getStripeClient();
     const customer = await stripe.customers.create({
       email: email || profile?.email,
       metadata: {

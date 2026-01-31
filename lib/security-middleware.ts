@@ -68,8 +68,11 @@ export function withSecurity(
 
       // 3. Apply rate limiting
       if (config.rateLimit) {
+        // Use pathname only (without query string) for consistent rate limiting
+        const url = new URL(req.url);
+        const rateLimitKey = url.pathname;
         const rateLimitResult = await RateLimiter.check(
-          req.url,
+          rateLimitKey,
           config.rateLimit
         );
 
@@ -166,7 +169,7 @@ export function withSecurity(
  */
 function isAllowedOrigin(origin: string): boolean {
   const allowedOrigins = [
-    process.env.NEXT_PUBLIC_BASE_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002'
