@@ -1,19 +1,28 @@
 import { createGeminiAdapter } from './gemini-adapter';
 import { createGrokAdapter } from './grok-adapter';
-import type { ProviderAdapter, ProviderGenerateParams, ProviderGenerateResult } from './types';
+import { createOpenAIAdapter, createAzureOpenAIAdapter } from './openai-adapter';
+import type {
+  ProviderAdapter,
+  ProviderGenerateParams,
+  ProviderGenerateResult
+} from './types';
 
-type ProviderKey = 'grok' | 'gemini';
+type ProviderKey = 'grok' | 'gemini' | 'openai' | 'azure-openai';
 
 type ProviderFactory = () => ProviderAdapter;
 
 const providerFactories: Record<ProviderKey, ProviderFactory> = {
   grok: createGrokAdapter,
   gemini: createGeminiAdapter,
+  openai: createOpenAIAdapter,
+  'azure-openai': createAzureOpenAIAdapter
 };
 
 const providerEnvGuards: Record<ProviderKey, () => string | undefined> = {
   grok: () => process.env.XAI_API_KEY,
   gemini: () => process.env.GEMINI_API_KEY,
+  openai: () => process.env.OPENAI_API_KEY,
+  'azure-openai': () => process.env.AZURE_OPENAI_API_KEY
 };
 
 const providerCache: Partial<Record<ProviderKey, ProviderAdapter>> = {};
@@ -28,12 +37,10 @@ function resolveProviderKey(preferred?: string): ProviderKey {
     return envPreference as ProviderKey;
   }
 
-  if (providerEnvGuards.grok()) {
-    return 'grok';
-  }
-  if (providerEnvGuards.gemini()) {
-    return 'gemini';
-  }
+  if (providerEnvGuards.grok()) return 'grok';
+  if (providerEnvGuards.gemini()) return 'gemini';
+  if (providerEnvGuards.openai()) return 'openai';
+  if (providerEnvGuards['azure-openai']()) return 'azure-openai';
 
   return 'grok';
 }
