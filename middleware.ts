@@ -25,7 +25,7 @@ export async function middleware(request: NextRequest) {
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.youtube.com https://s.ytimg.com https://*.googleapis.com https://js.stripe.com",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https://i.ytimg.com https://img.youtube.com https://*.ytimg.com",
+    "img-src 'self' data: blob: https://i.ytimg.com https://img.youtube.com https://*.ytimg.com https://lh3.googleusercontent.com",
     "font-src 'self' data:",
     [
       "connect-src 'self'",
