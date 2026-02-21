@@ -1,14 +1,23 @@
 import { createServiceRoleClient } from '../../../../lib/supabase/admin';
 import { NextResponse } from 'next/server';
+import { verifyUnsubscribeToken } from '@/lib/newsletter-security';
 
 export async function POST(request: Request) {
   try {
-    const { userId } = await request.json();
+    const { userId, token } = await request.json();
 
     if (!userId) {
       return NextResponse.json(
         { error: 'User ID is required' },
         { status: 400 }
+      );
+    }
+
+    // Validate token to prevent unauthorized unsubscriptions
+    if (!token || !verifyUnsubscribeToken(userId, token)) {
+      return NextResponse.json(
+        { error: 'Invalid or missing unsubscribe token' },
+        { status: 403 }
       );
     }
 
