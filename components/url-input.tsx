@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Loader2, ArrowUp, Link, Sparkles } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Loader2, ArrowUp, Link, Sparkles, X } from "lucide-react";
 import { extractVideoId } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ export function UrlInput({
   const [error, setError] = useState("");
   const [isFocused, setIsFocused] = useState(false);
   const [isValidUrl, setIsValidUrl] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const forceSmartMode = isGrokProviderOnClient();
   const showModeSelector =
     !forceSmartMode && typeof onModeChange === "function";
@@ -49,6 +50,13 @@ export function UrlInput({
     const videoId = extractVideoId(url);
     setIsValidUrl(!!videoId);
   }, [url]);
+
+  const handleClear = () => {
+    setUrl("");
+    setIsValidUrl(false);
+    setError("");
+    inputRef.current?.focus();
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,6 +92,7 @@ export function UrlInput({
               <Link className="h-5 w-5 text-[#989999]" strokeWidth={1.8} />
             </div>
             <input
+              ref={inputRef}
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
@@ -96,6 +105,16 @@ export function UrlInput({
               className="flex-1 border-0 bg-transparent text-[14px] text-[#989999] placeholder:text-[#989999] focus:outline-none"
               disabled={isLoading}
             />
+            {url && !isLoading && (
+              <button
+                type="button"
+                onClick={handleClear}
+                className="text-[#989999] hover:text-[#5c5c5c] focus:outline-none transition-colors"
+                aria-label="Clear URL"
+              >
+                <X className="h-5 w-5" strokeWidth={1.8} />
+              </button>
+            )}
           </div>
 
           {/* Bottom row: Mode selector (left) and actions (right) */}
