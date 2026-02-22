@@ -27,7 +27,10 @@ export function parseTimestamp(timestamp: string): number | null {
   
   // Validate time values
   if (hours < 0 || hours >= 24) return null;
-  if (minutes < 0 || minutes >= 60) return null;
+  if (minutes < 0) return null;
+  // Relax minute check to allow MM:SS where MM >= 60 (fallback scenarios)
+  // unless hours are present, in which case strict 0-59 applies
+  if (hours > 0 && minutes >= 60) return null;
   if (seconds < 0 || seconds >= 60) return null;
   
   return hours * 3600 + minutes * 60 + seconds;
