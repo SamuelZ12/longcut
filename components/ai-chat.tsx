@@ -155,6 +155,7 @@ export function AIChat({
   const followUpQuestionsRef = useRef<string[]>([]);
   const followUpRequestIdRef = useRef(0);
   const isComposingRef = useRef(false);
+  const compositionTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     const viewport = scrollViewportRef.current;
@@ -1269,6 +1270,7 @@ export function AIChat({
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               onCompositionStart={() => {
+                clearTimeout(compositionTimeoutRef.current);
                 isComposingRef.current = true;
               }}
               onCompositionEnd={() => {
@@ -1277,7 +1279,7 @@ export function AIChat({
                 // In some browsers (e.g. Chrome with Chinese IME),
                 // compositionend fires before keydown for the Enter key
                 // that confirms the composition.
-                setTimeout(() => {
+                compositionTimeoutRef.current = setTimeout(() => {
                   isComposingRef.current = false;
                 }, 0);
               }}
