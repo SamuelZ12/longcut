@@ -114,10 +114,11 @@ export default function PrivacyPage() {
           .
         </p>
 
-        <h3 className="text-xl font-medium text-[#3f3f3f]">Supadata</h3>
+        <h3 className="text-xl font-medium text-[#3f3f3f]">YouTube</h3>
         <p>
-          We use Supadata&apos;s API to fetch YouTube video transcripts. When you analyze a video, we send the video
-          ID to Supadata to retrieve the transcript data.
+          We fetch public YouTube video metadata and caption tracks directly from YouTube when you analyze a video.
+          This lets us build transcripts and show basic video details without routing that request through a separate
+          transcript provider.
         </p>
 
         <h3 className="text-xl font-medium text-[#3f3f3f]">Stripe</h3>

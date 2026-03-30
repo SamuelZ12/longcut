@@ -55,9 +55,6 @@ function validateRequiredEnvVars(): ValidationResult {
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
 
-    // Supadata (transcript fetching)
-    SUPADATA_API_KEY: process.env.SUPADATA_API_KEY,
-
     // Stripe (validated separately)
     STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
     NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,

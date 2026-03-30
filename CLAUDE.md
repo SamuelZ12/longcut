@@ -37,7 +37,7 @@ The app uses Next.js 15 App Router with two main pages:
 1. User inputs YouTube URL → `components/url-input.tsx`
 2. Router navigates to `/analyze/[videoId]` with optional query params (`url`, `cached`)
 3. Fetch video info → `app/api/video-info/route.ts` (metadata & thumbnails)
-4. Fetch transcript → `app/api/transcript/route.ts` (uses Supadata API)
+4. Fetch transcript → `app/api/transcript/route.ts` (extracts public YouTube caption tracks directly)
 5. Generate AI content in parallel:
    - Highlight reels → `app/api/generate-topics/route.ts`
    - Video summary → `app/api/generate-summary/route.ts`
@@ -54,7 +54,7 @@ The app uses Next.js 15 App Router with two main pages:
 ### API Routes
 
 #### Core Video Processing
-- `/api/transcript`: Fetches YouTube transcripts via Supadata API
+- `/api/transcript`: Fetches YouTube transcripts from public YouTube caption tracks
 - `/api/video-info`: Retrieves video metadata (title, author, duration, thumbnail)
 - `/api/generate-topics`: Creates highlight reels using Gemini (supports `smart`/`fast` mode + theme selection)
 - `/api/generate-summary`: Creates comprehensive video summary using Gemini
@@ -317,7 +317,6 @@ The application uses aggressive parallel processing to minimize latency:
 ### Environment Variables
 Required in `.env.local`:
 - `GEMINI_API_KEY`: Google Gemini API key for AI generation
-- `SUPADATA_API_KEY`: Supadata API key for transcript fetching
 - `NEXT_PUBLIC_SUPABASE_URL`: Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase anonymous key
 

@@ -4,7 +4,7 @@ LongCut turns long-form YouTube videos into a structured learning workspace. Pas
 
 ## Overview
 
-The project is a Next.js 15 + React 19 application that wraps xAI’s Grok 4 Fast models (with optional Gemini adapters) and Supadata transcripts with a polished UX. Supabase provides authentication, persistence, rate limiting, and profile preferences. The experience is optimized for fast iteration using Turbopack, Tailwind CSS v4, and shadcn/ui components.
+The project is a Next.js 15 + React 19 application that wraps xAI’s Grok 4 Fast models (with optional Gemini adapters) and free YouTube transcript extraction with a polished UX. Supabase provides authentication, persistence, rate limiting, and profile preferences. The experience is optimized for fast iteration using Turbopack, Tailwind CSS v4, and shadcn/ui components.
 
 ## Feature Highlights
 
@@ -26,7 +26,7 @@ The project is a Next.js 15 + React 19 application that wraps xAI’s Grok 4 Fas
 - Frontend stack: Next.js 15 App Router, React 19, TypeScript, Tailwind CSS v4, shadcn/ui, lucide-react, sonner toasts.
 - Backend runtime: Next.js serverless route handlers with `withSecurity` middleware for CSRF, input validation (Zod), and rate caps.
 - AI pipeline: `lib/ai-processing.ts` and `lib/ai-client.ts` orchestrate provider-agnostic prompts, structured output schemas, fallback handling, and transcript chunking via `lib/ai-providers/`.
-- Transcript & metadata: Supadata API delivers transcripts; lightweight YouTube oEmbed calls pull thumbnails and titles.
+- Transcript & metadata: `/api/transcript` extracts public YouTube captions directly; `/api/video-info` fetches public video metadata from YouTube oEmbed with a minimal fallback.
 - Persistence: Supabase stores `video_analyses`, `user_videos` (history + favorites), `user_notes`, `profiles` (topic generation mode, profile data), and `rate_limits`.
 - Authentication: Supabase Auth with session refresh in `middleware.ts`; `AuthModal` drives sign-up prompts when limits are hit.
 - Security: Global middleware adds CSP/HSTS headers, CSRF tokens for stateful requests, hashed IP identifiers for anonymous rate limiting, and request body size guards.
@@ -92,7 +92,7 @@ The project is a Next.js 15 + React 19 application that wraps xAI’s Grok 4 Fas
 
 - Node.js 18+ (Next.js 15 requires 18.18 or newer)
 - `npm` (repo uses package-lock.json), though `pnpm` or `yarn` also work
-- Supabase project (Auth + Postgres) and API keys for Supadata & at least one AI provider (xAI Grok recommended, Gemini optional)
+- Supabase project (Auth + Postgres) and at least one AI provider key (xAI Grok recommended, Gemini optional)
 
 ### 1. Clone & Install
 
@@ -110,7 +110,6 @@ Create `.env.local` in the repo root:
 | --- | --- | --- |
 | `XAI_API_KEY` | yes* | xAI Grok API key (`grok-4-1-fast-non-reasoning` by default) |
 | `GEMINI_API_KEY` | optional* | Google Gemini API key (enable if `AI_PROVIDER=gemini`) |
-| `SUPADATA_API_KEY` | yes | Supadata transcript API key |
 | `NEXT_PUBLIC_SUPABASE_URL` | yes | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | yes | Supabase anonymous key |
 | `CSRF_SALT` | yes | Long random string used to sign CSRF tokens |
@@ -140,7 +139,7 @@ npm run dev        # starts Next.js with Turbopack on http://localhost:3000
 npm run lint       # optional: run lint checks (ESLint v9)
 ```
 
-The dev server reaches out to Supadata and your configured AI provider(s) directly, so make sure those API keys have local allowlists if your project settings restrict origins.
+The dev server reaches out to YouTube and your configured AI provider(s) directly.
 
 ## Developer Notes
 

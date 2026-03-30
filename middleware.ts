@@ -29,7 +29,6 @@ export async function middleware(request: NextRequest) {
     "font-src 'self' data:",
     [
       "connect-src 'self'",
-      'https://api.supadata.ai',
       'https://*.supabase.co',
       'https://*.supabase.in',
       'https://*.supabase.net',
