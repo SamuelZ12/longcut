@@ -78,22 +78,95 @@ async function handler(request: NextRequest) {
       });
     }
 
-    console.log(`[TRANSCRIPT] Attempting free transcript fetch for ${videoId} with lang=${lang ?? 'auto-detect'}`);
+    // ── Strategy: Try YouTube direct first (free), fall back to Supadata (paid) ──
+    // YouTube's InnerTube API is free but gets blocked from datacenter IPs.
+    // Supadata is a paid API that handles YouTube's bot detection for us.
+    // By trying free first, we only pay for Supadata when YouTube blocks us.
 
-    const transcriptResult = await fetchYouTubeTranscript(videoId, lang, expectedDuration);
+    let rawSegments: { text: string; start: number; duration: number }[] | null = null;
+    let language: string | undefined;
+    let availableLanguages: string[] | undefined;
+    let source: 'youtube-direct' | 'supadata' = 'youtube-direct';
 
-    if (!transcriptResult || transcriptResult.segments.length === 0) {
+    // ── Attempt 1: YouTube InnerTube API (free) ──
+    console.log(`[TRANSCRIPT] Trying YouTube direct for ${videoId} (lang=${lang ?? 'auto'})`);
+    try {
+      const ytResult = await fetchYouTubeTranscript(videoId, lang, expectedDuration);
+      if (ytResult && ytResult.segments.length > 0) {
+        rawSegments = ytResult.segments;
+        language = ytResult.language;
+        availableLanguages = ytResult.availableLanguages;
+        source = 'youtube-direct';
+        console.log(`[TRANSCRIPT] YouTube direct succeeded: ${rawSegments.length} segments, lang=${language}`);
+      }
+    } catch (ytError) {
+      console.warn(`[TRANSCRIPT] YouTube direct failed:`, ytError instanceof Error ? ytError.message : String(ytError));
+    }
+
+    // ── Attempt 2: Supadata API (paid fallback) ──
+    if (!rawSegments || rawSegments.length === 0) {
+      const supadataKey = process.env.SUPADATA_API_KEY;
+      if (supadataKey) {
+        console.log(`[TRANSCRIPT] Falling back to Supadata for ${videoId}`);
+        source = 'supadata';
+        try {
+          const apiUrl = new URL('https://api.supadata.ai/v1/transcript');
+          apiUrl.searchParams.set('url', `https://www.youtube.com/watch?v=${videoId}`);
+          if (lang) apiUrl.searchParams.set('lang', lang);
+
+          const supadataResp = await fetch(apiUrl.toString(), {
+            method: 'GET',
+            headers: { 'x-api-key': supadataKey, 'Content-Type': 'application/json' },
+          });
+
+          if (supadataResp.ok) {
+            const body = await supadataResp.json() as Record<string, unknown>;
+            const content = Array.isArray(body?.content) ? body.content
+              : Array.isArray(body?.transcript) ? body.transcript
+              : Array.isArray(body) ? body : null;
+
+            if (content && content.length > 0) {
+              // Supadata returns timestamps in either ms or seconds — detect and normalize
+              const sampleSize = Math.min(5, content.length);
+              let totalOffset = 0;
+              let offsetCount = 0;
+              for (let i = 0; i < sampleSize; i++) {
+                const val = content[i].offset ?? content[i].start ?? 0;
+                if (val > 0) { totalOffset += val; offsetCount++; }
+              }
+              const isMs = offsetCount > 0 && (totalOffset / offsetCount) > 500;
+
+              rawSegments = content.map((item: any) => ({
+                text: (item.text || item.content || '').replace(/^>>\s*/gm, ''),
+                start: isMs ? ((item.offset ?? item.start ?? 0) / 1000) : (item.offset ?? item.start ?? 0),
+                duration: isMs ? ((item.duration ?? 0) / 1000) : (item.duration ?? 0),
+              }));
+              language = typeof body?.lang === 'string' ? body.lang : undefined;
+              availableLanguages = Array.isArray(body?.availableLangs)
+                ? (body.availableLangs as unknown[]).filter((l): l is string => typeof l === 'string')
+                : undefined;
+              console.log(`[TRANSCRIPT] Supadata fallback succeeded: ${rawSegments!.length} segments`);
+            }
+          } else {
+            console.warn(`[TRANSCRIPT] Supadata returned ${supadataResp.status}`);
+          }
+        } catch (supErr) {
+          console.error(`[TRANSCRIPT] Supadata fallback failed:`, supErr instanceof Error ? supErr.message : String(supErr));
+        }
+      } else {
+        console.warn(`[TRANSCRIPT] YouTube direct failed and no SUPADATA_API_KEY configured`);
+      }
+    }
+
+    // ── Both methods failed ──
+    if (!rawSegments || rawSegments.length === 0) {
       return respondWithNoCredits(
         { error: 'No transcript available for this video. The video may not have subtitles enabled.' },
         404
       );
     }
 
-    const rawSegments = transcriptResult.segments;
-    const language = transcriptResult.language;
-    const availableLanguages = transcriptResult.availableLanguages;
-
-    console.log('[TRANSCRIPT] Free transcript response:', {
+    console.log(`[TRANSCRIPT] Using ${source} result:`, {
       videoId,
       segmentCount: rawSegments.length,
       transcriptDuration: Math.round(calculateTranscriptDuration(rawSegments)),
@@ -123,6 +196,7 @@ async function handler(request: NextRequest) {
     // Diagnostic logging: track processed transcript stats
     console.log('[TRANSCRIPT] Processed transcript:', {
       videoId,
+      source,
       rawSegmentCount: rawSegments.length,
       mergedSegmentCount: transformedTranscript.length,
       transcriptDuration: Math.round(transcriptDuration),
