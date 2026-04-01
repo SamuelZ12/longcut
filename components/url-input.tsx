@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Loader2, ArrowUp, Link, Sparkles } from "lucide-react";
 import { extractVideoId } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ModeSelector } from "@/components/mode-selector";
-import { isGrokProviderOnClient } from "@/lib/ai-providers/client-config";
+import { shouldForceSmartModeOnClient } from "@/lib/ai-providers/client-config";
 import type { TopicGenerationMode } from "@/lib/types";
 
 interface UrlInputProps {
@@ -31,7 +31,7 @@ export function UrlInput({
   const [error, setError] = useState("");
   const [isFocused, setIsFocused] = useState(false);
   const [isValidUrl, setIsValidUrl] = useState(false);
-  const forceSmartMode = isGrokProviderOnClient();
+  const forceSmartMode = shouldForceSmartModeOnClient();
   const showModeSelector =
     !forceSmartMode && typeof onModeChange === "function";
   const showFeelingLucky = typeof onFeelingLucky === "function";

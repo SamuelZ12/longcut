@@ -54,6 +54,12 @@ test('provider behavior forceFullTranscriptTopicGeneration is enabled only for G
   );
 });
 
+test('provider behavior forceSmartModeOnClient is enabled for Grok and MiniMax only', () => {
+  assert.equal(getProviderBehavior('grok').forceSmartModeOnClient, true);
+  assert.equal(getProviderBehavior('minimax').forceSmartModeOnClient, true);
+  assert.equal(getProviderBehavior('gemini').forceSmartModeOnClient, false);
+});
+
 test('deterministic fallback order prefers Grok before Gemini before MiniMax', () => {
   assert.deepEqual(getProviderFallbackOrder('minimax'), ['grok', 'gemini']);
   assert.deepEqual(getProviderFallbackOrder('gemini'), ['grok', 'minimax']);

@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { Zap, Brain } from "lucide-react";
 import type { TopicGenerationMode } from "@/lib/types";
 import {

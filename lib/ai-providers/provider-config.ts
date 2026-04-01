@@ -11,12 +11,15 @@ const PROVIDER_DEFAULT_MODELS: Record<ProviderKey, string> = {
 const PROVIDER_BEHAVIORS: Record<ProviderKey, ProviderBehavior> = {
   grok: {
     forceFullTranscriptTopicGeneration: true,
+    forceSmartModeOnClient: true,
   },
   gemini: {
     forceFullTranscriptTopicGeneration: false,
+    forceSmartModeOnClient: false,
   },
   minimax: {
     forceFullTranscriptTopicGeneration: false,
+    forceSmartModeOnClient: true,
   },
 };
 

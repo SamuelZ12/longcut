@@ -4,6 +4,7 @@ export type ProviderKey = 'grok' | 'gemini' | 'minimax';
 
 export interface ProviderBehavior {
   forceFullTranscriptTopicGeneration: boolean;
+  forceSmartModeOnClient: boolean;
 }
 
 export interface ProviderGenerateParams {

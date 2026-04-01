@@ -1,4 +1,7 @@
-import { normalizeProviderKey } from './provider-config';
+import {
+  getProviderBehavior,
+  normalizeProviderKey,
+} from './provider-config';
 import type { ProviderKey } from './types';
 
 type ClientProviderKey = ProviderKey;
@@ -11,6 +14,6 @@ export function getClientProviderKey(): ClientProviderKey {
   return resolveClientProviderKey();
 }
 
-export function isGrokProviderOnClient(): boolean {
-  return resolveClientProviderKey() === 'grok';
+export function shouldForceSmartModeOnClient(): boolean {
+  return getProviderBehavior(resolveClientProviderKey()).forceSmartModeOnClient;
 }

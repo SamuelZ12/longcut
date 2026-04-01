@@ -4,10 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import type { TopicGenerationMode } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/auth-context";
-import { isGrokProviderOnClient } from "@/lib/ai-providers/client-config";
+import { shouldForceSmartModeOnClient } from "@/lib/ai-providers/client-config";
 
 const STORAGE_KEY = "tldw-mode-preference";
-const FORCE_SMART_MODE = isGrokProviderOnClient();
+const FORCE_SMART_MODE = shouldForceSmartModeOnClient();
 const DEFAULT_MODE: TopicGenerationMode = FORCE_SMART_MODE ? "smart" : "fast";
 
 /**
