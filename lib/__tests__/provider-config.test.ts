@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  getEffectiveProviderKey,
   getProviderModelDefaults,
   getProviderBehavior,
   getProviderDefaultModel,
@@ -73,6 +74,29 @@ test('provider model defaults derive fast and pro topic models from configured M
       AI_PRO_MODEL: undefined,
     },
     () => {
+      assert.deepEqual(getProviderModelDefaults(), {
+        defaultModel: 'MiniMax-M2.7',
+        fastModel: 'MiniMax-M2.7',
+        proModel: 'MiniMax-M2.7',
+      });
+    }
+  );
+});
+
+test('effective provider resolves to MiniMax when only MINIMAX_API_KEY is present', () => {
+  withEnv(
+    {
+      AI_PROVIDER: undefined,
+      NEXT_PUBLIC_AI_PROVIDER: undefined,
+      XAI_API_KEY: undefined,
+      GEMINI_API_KEY: undefined,
+      MINIMAX_API_KEY: 'test-minimax-key',
+      AI_DEFAULT_MODEL: undefined,
+      AI_FAST_MODEL: undefined,
+      AI_PRO_MODEL: undefined,
+    },
+    () => {
+      assert.equal(getEffectiveProviderKey(), 'minimax');
       assert.deepEqual(getProviderModelDefaults(), {
         defaultModel: 'MiniMax-M2.7',
         fastModel: 'MiniMax-M2.7',

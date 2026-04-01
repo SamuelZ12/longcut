@@ -38,7 +38,7 @@ export default function PrivacyPage() {
         <ul className="list-disc space-y-2 pl-6">
           <li>YouTube video IDs and URLs you submit</li>
           <li>Video metadata (title, author, duration, thumbnail)</li>
-          <li>Video transcripts obtained from third-party services</li>
+          <li>Video transcripts built from public YouTube caption tracks fetched directly from YouTube</li>
           <li>AI-generated content (highlights, summaries, topics, questions)</li>
           <li>Your notes and chat conversations related to videos</li>
           <li>Videos you mark as favorites</li>

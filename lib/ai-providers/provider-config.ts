@@ -20,6 +20,12 @@ const PROVIDER_BEHAVIORS: Record<ProviderKey, ProviderBehavior> = {
   },
 };
 
+const PROVIDER_ENV_KEYS: Record<ProviderKey, string> = {
+  grok: 'XAI_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+  minimax: 'MINIMAX_API_KEY',
+};
+
 export function normalizeProviderKey(value?: string | null): ProviderKey | undefined {
   const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
 
@@ -36,6 +42,22 @@ export function getConfiguredProviderKey(preferred?: string): ProviderKey | unde
   );
 }
 
+export function getEffectiveProviderKey(preferred?: string): ProviderKey {
+  const configuredProvider = getConfiguredProviderKey(preferred);
+
+  if (configuredProvider) {
+    return configuredProvider;
+  }
+
+  for (const key of PROVIDER_ORDER) {
+    if (process.env[PROVIDER_ENV_KEYS[key]]) {
+      return key;
+    }
+  }
+
+  return 'grok';
+}
+
 export function getProviderDefaultModel(key: ProviderKey): string {
   return PROVIDER_DEFAULT_MODELS[key];
 }
@@ -45,7 +67,7 @@ export function getProviderModelDefaults(preferred?: string): {
   fastModel: string;
   proModel: string;
 } {
-  const providerKey = getConfiguredProviderKey(preferred) ?? 'grok';
+  const providerKey = getEffectiveProviderKey(preferred);
   const defaultModel =
     process.env.AI_DEFAULT_MODEL ?? getProviderDefaultModel(providerKey);
   const fastModel = process.env.AI_FAST_MODEL ?? defaultModel;

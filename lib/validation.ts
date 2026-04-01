@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { STRICT_TIMESTAMP_RANGE_REGEX } from '@/lib/timestamp-utils';
 import {
-  getConfiguredProviderKey,
+  getEffectiveProviderKey,
   getProviderDefaultModel,
 } from '@/lib/ai-providers/provider-config';
 
@@ -93,7 +93,7 @@ export const topicSchema = z.object({
 
 const DEFAULT_AI_VALIDATION_MODEL =
   process.env.AI_DEFAULT_MODEL ??
-  getProviderDefaultModel(getConfiguredProviderKey() ?? 'grok');
+  getProviderDefaultModel(getEffectiveProviderKey());
 
 // Model selection validation
 export const modelSchema = z
