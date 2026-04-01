@@ -13,10 +13,13 @@ import {
 } from '@/lib/quote-matcher';
 import { generateAIResponse } from '@/lib/ai-client';
 import {
+  availableProviders,
   getProviderBehavior,
+  getProviderFallbackOrder,
   getProviderKey,
   getProviderModelDefaults,
 } from '@/lib/ai-providers';
+import type { ProviderKey } from '@/lib/ai-providers';
 import { topicGenerationSchema } from '@/lib/schemas';
 import { parseTimestampRange } from '@/lib/timestamp-utils';
 import { getLanguageName } from '@/lib/language-utils';
@@ -41,6 +44,7 @@ interface GenerateTopicsOptions {
   excludeTopicKeys?: Set<string>;
   includeCandidatePool?: boolean;
   mode?: TopicGenerationMode;
+  provider?: ProviderKey;
   proModel?: string;
   language?: string;
 }
@@ -61,6 +65,19 @@ interface CandidateTopic extends ParsedTopic {
 const DEFAULT_CHUNK_DURATION_SECONDS = 5 * 60; // 5 minutes
 const DEFAULT_CHUNK_OVERLAP_SECONDS = 45;
 const CHUNK_MAX_CANDIDATES = 2;
+
+interface ProviderBackedTopicGenerationResult {
+  topicsArray: ParsedTopic[];
+  candidateTopics: CandidateTopic[];
+  resolvedModel: string;
+}
+
+interface RetryProviderBackedTopicGenerationOptions<T> {
+  primaryProvider: ProviderKey;
+  availableProviderKeys?: ProviderKey[];
+  run: (provider: ProviderKey) => Promise<T | undefined>;
+  isUsableResult: (result: T | undefined) => boolean;
+}
 
 function chunkTranscript(
   segments: TranscriptSegment[],
@@ -329,6 +346,7 @@ async function reduceCandidateSubset(
     minTopics: number;
     maxTopics: number;
     fastModel: string;
+    provider?: ProviderKey;
     videoInfo?: Partial<VideoInfo>;
     segmentLabel?: string;
     language?: string;
@@ -358,6 +376,7 @@ async function reduceCandidateSubset(
 
   try {
     const reduceResponse = await generateAIResponse(reducePrompt, {
+      provider: options.provider,
       preferredModel: options.fastModel,
       temperature: 0.4,
       zodSchema: selectionSchema
@@ -417,6 +436,10 @@ async function reduceCandidateSubset(
   return reducedTopics;
 }
 
+export function buildFallbackTopicTitle(startTime: number, endTime: number): string {
+  return `Highlights from ${formatTime(startTime)}-${formatTime(endTime)}`;
+}
+
 function buildFallbackTopics(
   transcript: TranscriptSegment[],
   maxTopics: number,
@@ -459,7 +482,7 @@ function buildFallbackTopics(
     const endTime = endSegment.start + endSegment.duration;
 
     fallbackTopics.push({
-      title: theme ? `${theme} — part ${i + 1}` : `Part ${i + 1}`,
+      title: buildFallbackTopicTitle(startTime, endTime),
       quote: {
         timestamp: `[${formatTime(startTime)}-${formatTime(endTime)}]`,
         text:
@@ -487,8 +510,8 @@ function buildFallbackTopics(
 async function runSinglePassTopicGeneration(
   transcript: TranscriptSegment[],
   transcriptWithTimestamps: string,
-  fullText: string,
   model: string,
+  provider?: ProviderKey,
   theme?: string,
   language?: string
 ): Promise<ParsedTopic[]> {
@@ -563,6 +586,7 @@ ${transcriptWithTimestamps}
 
   try {
     const response = await generateAIResponse(prompt, {
+      provider,
       preferredModel: model,
       temperature: 0.7,
       zodSchema: topicGenerationSchema
@@ -584,26 +608,10 @@ ${transcriptWithTimestamps}
       } catch {
         console.warn('Failed to parse single-pass topic response as JSON (repair also failed)', error);
 
-        // For themed requests, avoid returning generic fallbacks that do not respect the theme.
-        if (theme) {
-          console.warn(
-            `[runSinglePassTopicGeneration] Skipping fallback after parse failure because a theme was requested: "${theme}"`
-          );
-          return [];
-        }
-
-        // Dynamic fallback: if total duration is known and short, use the full video window
-        const fallbackEnd = totalDuration > 0 ? Math.min(60, Math.round(totalDuration)) : 30;
-        const fallbackLabel = isVeryShort || isShort ? 'Full Video' : 'Full Video';
-        return [
-          {
-            title: fallbackLabel,
-            quote: {
-              timestamp: `[00:00-${formatTime(fallbackEnd)}]`,
-              text: fullText.substring(0, 200)
-            }
-          }
-        ];
+        console.warn(
+          `[runSinglePassTopicGeneration] Returning no topics after parse failure${theme ? ` for theme: "${theme}"` : ''}`
+        );
+        return [];
       }
     }
 
@@ -639,6 +647,359 @@ function formatTime(seconds: number): string {
   return `${mins.toString().padStart(2, '0')}:${secs
     .toString()
     .padStart(2, '0')}`;
+}
+
+function filterExcludedTopics(
+  topics: ParsedTopic[],
+  excludedKeys: Set<string>
+): ParsedTopic[] {
+  return topics.filter((topic) => {
+    if (!topic.quote?.timestamp || !topic.quote.text) return false;
+    const key = `${topic.quote.timestamp}|${normalizeWhitespace(topic.quote.text)}`;
+    return !excludedKeys.has(key);
+  });
+}
+
+export async function retryProviderBackedTopicGeneration<T>(
+  options: RetryProviderBackedTopicGenerationOptions<T>
+): Promise<{ result: T | undefined; providerUsed: ProviderKey }> {
+  const { primaryProvider, availableProviderKeys, run, isUsableResult } = options;
+  const fallbackProvider = getProviderFallbackOrder(
+    primaryProvider,
+    availableProviderKeys
+  )[0];
+
+  try {
+    const primaryResult = await run(primaryProvider);
+    if (isUsableResult(primaryResult)) {
+      console.log(
+        `[generateTopicsFromTranscript] Provider-backed topic generation succeeded with ${primaryProvider}`
+      );
+      return { result: primaryResult, providerUsed: primaryProvider };
+    }
+
+    if (!fallbackProvider) {
+      console.warn(
+        `[generateTopicsFromTranscript] Provider ${primaryProvider} produced no usable topics and no alternate provider is configured`
+      );
+      return { result: primaryResult, providerUsed: primaryProvider };
+    }
+
+    console.warn(
+      `[generateTopicsFromTranscript] Provider ${primaryProvider} produced no usable topics, retrying with ${fallbackProvider}`
+    );
+  } catch (error) {
+    if (!fallbackProvider) {
+      console.error(
+        `[generateTopicsFromTranscript] Provider-backed topic generation failed with ${primaryProvider} and no alternate provider is configured:`,
+        error
+      );
+      return { result: undefined, providerUsed: primaryProvider };
+    }
+
+    console.warn(
+      `[generateTopicsFromTranscript] Provider-backed topic generation failed with ${primaryProvider}, retrying with ${fallbackProvider}`,
+      error
+    );
+  }
+
+  try {
+    const fallbackResult = await run(fallbackProvider);
+    if (isUsableResult(fallbackResult)) {
+      console.log(
+        `[generateTopicsFromTranscript] Provider-backed topic generation succeeded with fallback provider ${fallbackProvider}`
+      );
+    } else {
+      console.warn(
+        `[generateTopicsFromTranscript] Fallback provider ${fallbackProvider} produced no usable topics; local fallback may be used`
+      );
+    }
+
+    return { result: fallbackResult, providerUsed: fallbackProvider };
+  } catch (error) {
+    console.error(
+      `[generateTopicsFromTranscript] Fallback provider ${fallbackProvider} failed; local fallback may be used:`,
+      error
+    );
+    return { result: undefined, providerUsed: fallbackProvider };
+  }
+}
+
+async function generateProviderBackedTopicsFromTranscript(
+  transcript: TranscriptSegment[],
+  options: GenerateTopicsOptions,
+  provider: ProviderKey
+): Promise<ProviderBackedTopicGenerationResult> {
+  const {
+    videoInfo,
+    chunkDurationSeconds = DEFAULT_CHUNK_DURATION_SECONDS,
+    chunkOverlapSeconds = DEFAULT_CHUNK_OVERLAP_SECONDS,
+    maxTopics = 5,
+    theme,
+    excludeTopicKeys,
+    mode = 'smart',
+    fastModel: fastModelOverride,
+    proModel: proModelOverride,
+    language
+  } = options;
+
+  const providerModelDefaults = getProviderModelDefaults(provider);
+  const fastModel = fastModelOverride ?? providerModelDefaults.fastModel;
+  const proModel = proModelOverride ?? providerModelDefaults.proModel;
+  const forceFullTranscript =
+    getProviderBehavior(provider).forceFullTranscriptTopicGeneration;
+  const requestedTopics = Math.max(1, Math.min(maxTopics, 5));
+  const isSmartMode = mode === 'smart';
+  const fullText = combineTranscript(transcript);
+  const transcriptWithTimestamps = formatTranscriptWithTimestamps(transcript);
+  const videoDurationSeconds =
+    transcript.length > 0
+      ? transcript[transcript.length - 1].start +
+        transcript[transcript.length - 1].duration
+      : 0;
+  const isShortVideo = videoDurationSeconds <= 30 * 60;
+  const smartModeModel = isShortVideo ? fastModel : proModel;
+
+  let topicsArray: ParsedTopic[] = [];
+  let candidateTopics: CandidateTopic[] = [];
+  const excludedKeys = excludeTopicKeys ?? new Set<string>();
+  let resolvedModel = isSmartMode ? smartModeModel : fastModel;
+
+  if (isSmartMode || forceFullTranscript) {
+    const singlePassModel = isSmartMode ? smartModeModel : fastModel;
+    resolvedModel = singlePassModel;
+
+    const smartTopics = await runSinglePassTopicGeneration(
+      transcript,
+      transcriptWithTimestamps,
+      singlePassModel,
+      provider,
+      theme,
+      language
+    );
+
+    topicsArray = filterExcludedTopics(smartTopics, excludedKeys);
+
+    if (topicsArray.length === 0 && isSmartMode && !forceFullTranscript) {
+      resolvedModel = fastModel;
+    }
+  }
+
+  if (
+    !forceFullTranscript &&
+    !isSmartMode &&
+    isShortVideo &&
+    transcript.length > 0
+  ) {
+    const fullTranscriptTopics = await runSinglePassTopicGeneration(
+      transcript,
+      transcriptWithTimestamps,
+      fastModel,
+      provider,
+      theme,
+      language
+    );
+    const filteredFullTranscriptTopics = filterExcludedTopics(
+      fullTranscriptTopics,
+      excludedKeys
+    );
+    if (filteredFullTranscriptTopics.length > 0) {
+      topicsArray = filteredFullTranscriptTopics;
+    }
+  }
+
+  let shouldRunFastPipeline = !isSmartMode || topicsArray.length === 0;
+  if (!isSmartMode && isShortVideo && topicsArray.length > 0) {
+    shouldRunFastPipeline = false;
+  }
+  if (forceFullTranscript) {
+    shouldRunFastPipeline = false;
+  }
+
+  if (!forceFullTranscript && shouldRunFastPipeline && transcript.length > 0) {
+    try {
+      const chunks = chunkTranscript(
+        transcript,
+        chunkDurationSeconds,
+        chunkOverlapSeconds
+      );
+      const chunkResults = await Promise.all(
+        chunks.map(async (chunk) => {
+          const chunkPrompt = buildChunkPrompt(
+            chunk,
+            CHUNK_MAX_CANDIDATES,
+            videoInfo,
+            theme,
+            language
+          );
+
+          try {
+            const response = await generateAIResponse(chunkPrompt, {
+              provider,
+              preferredModel: fastModel,
+              temperature: 0.6,
+              zodSchema: topicGenerationSchema
+            });
+
+            if (!response) {
+              return [] as CandidateTopic[];
+            }
+
+            let parsedChunk: ParsedTopic[];
+            try {
+              parsedChunk = JSON.parse(response);
+            } catch (error) {
+              console.warn(
+                `Failed to parse chunk response (${chunk.id}):`,
+                error
+              );
+              return [];
+            }
+
+            if (!Array.isArray(parsedChunk)) {
+              return [];
+            }
+
+            return parsedChunk
+              .slice(0, CHUNK_MAX_CANDIDATES)
+              .filter((topic) => topic?.quote?.timestamp && topic.quote.text)
+              .map((topic) => ({
+                title: topic.title,
+                quote: topic.quote,
+                sourceChunkId: chunk.id,
+                chunkStart: chunk.start,
+                chunkEnd: chunk.end
+              })) as CandidateTopic[];
+          } catch (error) {
+            console.error(
+              `Chunk topic generation failed (${chunk.id}):`,
+              error
+            );
+            return [] as CandidateTopic[];
+          }
+        })
+      );
+
+      candidateTopics = chunkResults.flat();
+    } catch (error) {
+      console.error('Error preparing chunked topic generation:', error);
+    }
+  }
+
+  if (candidateTopics.length > 0) {
+    candidateTopics = dedupeCandidates(candidateTopics);
+    if (excludedKeys.size > 0) {
+      candidateTopics = candidateTopics.filter((candidate) => {
+        if (!candidate.quote?.timestamp || !candidate.quote.text) return false;
+        const key = `${candidate.quote.timestamp}|${normalizeWhitespace(
+          candidate.quote.text
+        )}`;
+        return !excludedKeys.has(key);
+      });
+    }
+
+    const videoDuration = videoDurationSeconds;
+    let firstSegmentCandidates: CandidateTopic[] = [];
+    let secondSegmentCandidates: CandidateTopic[] = [];
+
+    if (candidateTopics.length === 1) {
+      firstSegmentCandidates = [...candidateTopics];
+    } else if (videoDuration > 0) {
+      const boundaryTime = videoDuration * 0.6;
+      for (const candidate of candidateTopics) {
+        if (candidate.chunkStart < boundaryTime) {
+          firstSegmentCandidates.push(candidate);
+        } else {
+          secondSegmentCandidates.push(candidate);
+        }
+      }
+    }
+
+    if (
+      firstSegmentCandidates.length === 0 &&
+      secondSegmentCandidates.length === 0
+    ) {
+      firstSegmentCandidates = [...candidateTopics];
+    } else if (
+      firstSegmentCandidates.length === 0 &&
+      secondSegmentCandidates.length > 0
+    ) {
+      const pivot = Math.ceil(secondSegmentCandidates.length / 2);
+      firstSegmentCandidates = secondSegmentCandidates.slice(0, pivot);
+      secondSegmentCandidates = secondSegmentCandidates.slice(pivot);
+    }
+
+    const firstTarget = Math.min(3, requestedTopics);
+    const secondTarget = Math.min(
+      2,
+      Math.max(0, requestedTopics - firstTarget)
+    );
+
+    const segmentConfigs = [
+      {
+        label: 'first 3/5 of the video',
+        candidates: firstSegmentCandidates,
+        maxTopics: firstTarget,
+        minTopics: firstTarget > 0 ? 1 : 0
+      },
+      {
+        label: 'final 2/5 of the video',
+        candidates: secondSegmentCandidates,
+        maxTopics: secondTarget,
+        minTopics: 0
+      }
+    ].filter(
+      (segment) => segment.candidates.length > 0 && segment.maxTopics > 0
+    );
+
+    const selectionPromises = segmentConfigs.map((segment) =>
+      reduceCandidateSubset(segment.candidates, {
+        minTopics: segment.minTopics,
+        maxTopics: segment.maxTopics,
+        fastModel,
+        provider,
+        videoInfo,
+        segmentLabel: segment.label,
+        language
+      })
+    );
+
+    const selectionResults = await Promise.allSettled(selectionPromises);
+    const combinedSelections: ParsedTopic[] = [];
+
+    selectionResults.forEach((result, idx) => {
+      if (result.status === 'fulfilled') {
+        combinedSelections.push(...result.value);
+      } else {
+        console.error(
+          `Topic reduction failed for ${
+            segmentConfigs[idx]?.label ?? 'segment'
+          }:`,
+          result.reason
+        );
+      }
+    });
+
+    topicsArray = combinedSelections.slice(0, requestedTopics);
+  }
+
+  if (topicsArray.length === 0) {
+    const singlePassTopics = await runSinglePassTopicGeneration(
+      transcript,
+      transcriptWithTimestamps,
+      isSmartMode ? smartModeModel : fastModel,
+      provider,
+      theme,
+      language
+    );
+    topicsArray = filterExcludedTopics(singlePassTopics, excludedKeys);
+  }
+
+  return {
+    topicsArray,
+    candidateTopics,
+    resolvedModel
+  };
 }
 
 async function findExactQuotes(
@@ -781,286 +1142,39 @@ export async function generateTopicsFromTranscript(
   modelUsed: string;
 }> {
   const {
-    fastModel = getProviderModelDefaults().fastModel,
-    videoInfo,
-    chunkDurationSeconds = DEFAULT_CHUNK_DURATION_SECONDS,
-    chunkOverlapSeconds = DEFAULT_CHUNK_OVERLAP_SECONDS,
     maxTopics = 5,
     theme,
     excludeTopicKeys,
     includeCandidatePool,
     mode = 'smart',
-    proModel = getProviderModelDefaults().proModel,
+    provider,
     language
   } = options;
 
-  const providerKey = getProviderKey();
-  const forceFullTranscript =
-    getProviderBehavior(providerKey).forceFullTranscriptTopicGeneration;
   const requestedTopics = Math.max(1, Math.min(maxTopics, 5));
-  const isSmartMode = mode === 'smart';
   const fullText = combineTranscript(transcript);
-  const transcriptWithTimestamps = formatTranscriptWithTimestamps(transcript);
-  const videoDurationSeconds =
-    transcript.length > 0
-      ? transcript[transcript.length - 1].start +
-        transcript[transcript.length - 1].duration
-      : 0;
-  const isShortVideo = videoDurationSeconds <= 30 * 60;
-  const smartModeModel = isShortVideo ? fastModel : proModel;
-
-  let topicsArray: ParsedTopic[] = [];
-  let candidateTopics: CandidateTopic[] = [];
   const excludedKeys = excludeTopicKeys ?? new Set<string>();
-  let resolvedModel = isSmartMode ? smartModeModel : fastModel;
+  const primaryProvider = getProviderKey(provider);
+  const providerRetryResult = await retryProviderBackedTopicGeneration({
+    primaryProvider,
+    availableProviderKeys: availableProviders(),
+    run: async (providerKey) =>
+      generateProviderBackedTopicsFromTranscript(transcript, options, providerKey),
+    isUsableResult: (result) => (result?.topicsArray.length ?? 0) > 0
+  });
 
-  if (isSmartMode || forceFullTranscript) {
-    const singlePassModel = isSmartMode ? smartModeModel : fastModel;
-    resolvedModel = singlePassModel;
-
-    const smartTopics = await runSinglePassTopicGeneration(
-      transcript,
-      transcriptWithTimestamps,
-      fullText,
-      singlePassModel,
-      theme,
-      language
-    );
-
-    topicsArray = smartTopics.filter((topic) => {
-      if (!topic.quote?.timestamp || !topic.quote.text) return false;
-      const key = `${topic.quote.timestamp}|${normalizeWhitespace(
-        topic.quote.text
-      )}`;
-      return !excludedKeys.has(key);
-    });
-
-    if (topicsArray.length === 0 && isSmartMode && !forceFullTranscript) {
-      // Fallback to fast pipeline if smart fails to produce topics
-      resolvedModel = fastModel;
-    }
-  }
-
-  if (
-    !forceFullTranscript &&
-    !isSmartMode &&
-    isShortVideo &&
-    transcript.length > 0
-  ) {
-    const fullTranscriptTopics = await runSinglePassTopicGeneration(
-      transcript,
-      transcriptWithTimestamps,
-      fullText,
-      fastModel,
-      theme,
-      language
-    );
-    const filteredFullTranscriptTopics = fullTranscriptTopics.filter(
-      (topic) => {
-        if (!topic.quote?.timestamp || !topic.quote.text) return false;
-        const key = `${topic.quote.timestamp}|${normalizeWhitespace(
-          topic.quote.text
-        )}`;
-        return !excludedKeys.has(key);
-      }
-    );
-    if (filteredFullTranscriptTopics.length > 0) {
-      topicsArray = filteredFullTranscriptTopics;
-    }
-  }
-
-  let shouldRunFastPipeline = !isSmartMode || topicsArray.length === 0;
-  if (!isSmartMode && isShortVideo && topicsArray.length > 0) {
-    shouldRunFastPipeline = false;
-  }
-  if (forceFullTranscript) {
-    shouldRunFastPipeline = false;
-  }
-
-  if (!forceFullTranscript && shouldRunFastPipeline && transcript.length > 0) {
-    try {
-      const chunks = chunkTranscript(
-        transcript,
-        chunkDurationSeconds,
-        chunkOverlapSeconds
-      );
-      const chunkResults = await Promise.all(
-        chunks.map(async (chunk) => {
-          const chunkPrompt = buildChunkPrompt(
-            chunk,
-            CHUNK_MAX_CANDIDATES,
-            videoInfo,
-            theme,
-            language
-          );
-
-          try {
-            const response = await generateAIResponse(chunkPrompt, {
-              preferredModel: fastModel,
-              temperature: 0.6,
-              zodSchema: topicGenerationSchema
-            });
-
-            if (!response) {
-              return [] as CandidateTopic[];
-            }
-
-            let parsedChunk: ParsedTopic[];
-            try {
-              parsedChunk = JSON.parse(response);
-            } catch (error) {
-              console.warn(
-                `Failed to parse chunk response (${chunk.id}):`,
-                error
-              );
-              return [];
-            }
-
-            if (!Array.isArray(parsedChunk)) {
-              return [];
-            }
-
-            return parsedChunk
-              .slice(0, CHUNK_MAX_CANDIDATES)
-              .filter((topic) => topic?.quote?.timestamp && topic.quote.text)
-              .map((topic) => ({
-                title: topic.title,
-                quote: topic.quote,
-                sourceChunkId: chunk.id,
-                chunkStart: chunk.start,
-                chunkEnd: chunk.end
-              })) as CandidateTopic[];
-          } catch (error) {
-            console.error(
-              `Chunk topic generation failed (${chunk.id}):`,
-              error
-            );
-            return [] as CandidateTopic[];
-          }
-        })
-      );
-
-      candidateTopics = chunkResults.flat();
-    } catch (error) {
-      console.error('Error preparing chunked topic generation:', error);
-    }
-  }
-
-  if (candidateTopics.length > 0) {
-    candidateTopics = dedupeCandidates(candidateTopics);
-    if (excludedKeys.size > 0) {
-      candidateTopics = candidateTopics.filter((candidate) => {
-        if (!candidate.quote?.timestamp || !candidate.quote.text) return false;
-        const key = `${candidate.quote.timestamp}|${normalizeWhitespace(
-          candidate.quote.text
-        )}`;
-        return !excludedKeys.has(key);
-      });
-    }
-
-    const videoDuration = videoDurationSeconds;
-    let firstSegmentCandidates: CandidateTopic[] = [];
-    let secondSegmentCandidates: CandidateTopic[] = [];
-
-    if (candidateTopics.length === 1) {
-      firstSegmentCandidates = [...candidateTopics];
-    } else if (videoDuration > 0) {
-      const boundaryTime = videoDuration * 0.6; // First 3/5 of the video
-      for (const candidate of candidateTopics) {
-        if (candidate.chunkStart < boundaryTime) {
-          firstSegmentCandidates.push(candidate);
-        } else {
-          secondSegmentCandidates.push(candidate);
-        }
-      }
-    }
-
-    if (
-      firstSegmentCandidates.length === 0 &&
-      secondSegmentCandidates.length === 0
-    ) {
-      firstSegmentCandidates = [...candidateTopics];
-    } else if (
-      firstSegmentCandidates.length === 0 &&
-      secondSegmentCandidates.length > 0
-    ) {
-      const pivot = Math.ceil(secondSegmentCandidates.length / 2);
-      firstSegmentCandidates = secondSegmentCandidates.slice(0, pivot);
-      secondSegmentCandidates = secondSegmentCandidates.slice(pivot);
-    }
-
-    const firstTarget = Math.min(3, requestedTopics);
-    const secondTarget = Math.min(
-      2,
-      Math.max(0, requestedTopics - firstTarget)
-    );
-
-    const segmentConfigs = [
-      {
-        label: 'first 3/5 of the video',
-        candidates: firstSegmentCandidates,
-        maxTopics: firstTarget,
-        minTopics: firstTarget > 0 ? 1 : 0
-      },
-      {
-        label: 'final 2/5 of the video',
-        candidates: secondSegmentCandidates,
-        maxTopics: secondTarget,
-        minTopics: 0
-      }
-    ].filter(
-      (segment) => segment.candidates.length > 0 && segment.maxTopics > 0
-    );
-
-    const selectionPromises = segmentConfigs.map((segment) =>
-      reduceCandidateSubset(segment.candidates, {
-        minTopics: segment.minTopics,
-        maxTopics: segment.maxTopics,
-        fastModel,
-        videoInfo,
-        segmentLabel: segment.label,
-        language
-      })
-    );
-
-    const selectionResults = await Promise.allSettled(selectionPromises);
-    const combinedSelections: ParsedTopic[] = [];
-
-    selectionResults.forEach((result, idx) => {
-      if (result.status === 'fulfilled') {
-        combinedSelections.push(...result.value);
-      } else {
-        console.error(
-          `Topic reduction failed for ${
-            segmentConfigs[idx]?.label ?? 'segment'
-          }:`,
-          result.reason
-        );
-      }
-    });
-
-    topicsArray = combinedSelections.slice(0, requestedTopics);
-  }
+  let topicsArray = providerRetryResult.result?.topicsArray ?? [];
+  const candidateTopics = providerRetryResult.result?.candidateTopics ?? [];
+  let resolvedModel =
+    providerRetryResult.result?.resolvedModel ??
+    getProviderModelDefaults(providerRetryResult.providerUsed)[
+      mode === 'smart' ? 'proModel' : 'fastModel'
+    ];
 
   if (topicsArray.length === 0) {
-    const singlePassTopics = await runSinglePassTopicGeneration(
-      transcript,
-      transcriptWithTimestamps,
-      fullText,
-      isSmartMode ? smartModeModel : fastModel,
-      theme,
-      language
+    console.warn(
+      `[generateTopicsFromTranscript] Falling back to local topic generation after provider-backed attempts (${providerRetryResult.providerUsed} was the last provider tried)`
     );
-    topicsArray = singlePassTopics.filter((topic) => {
-      if (!topic.quote?.timestamp || !topic.quote.text) return false;
-      const key = `${topic.quote.timestamp}|${normalizeWhitespace(
-        topic.quote.text
-      )}`;
-      return !excludedKeys.has(key);
-    });
-  }
-
-  if (topicsArray.length === 0) {
     const fallbackTopics = buildFallbackTopics(
       transcript,
       requestedTopics,
@@ -1193,10 +1307,6 @@ export async function generateTopicsFromTranscript(
     }
 
     candidates = Array.from(candidateMap.values());
-  }
-
-  if (topics.length === 0) {
-    resolvedModel = isSmartMode ? smartModeModel : fastModel;
   }
 
   return { topics, candidates, modelUsed: resolvedModel };
