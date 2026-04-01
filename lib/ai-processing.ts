@@ -778,7 +778,6 @@ async function generateProviderBackedTopicsFromTranscript(
     getProviderBehavior(provider).forceFullTranscriptTopicGeneration;
   const requestedTopics = Math.max(1, Math.min(maxTopics, 5));
   const isSmartMode = mode === 'smart';
-  const fullText = combineTranscript(transcript);
   const transcriptWithTimestamps = formatTranscriptWithTimestamps(transcript);
   const videoDurationSeconds =
     transcript.length > 0
@@ -1181,8 +1180,7 @@ export async function generateTopicsFromTranscript(
     excludeTopicKeys,
     includeCandidatePool,
     mode = 'smart',
-    provider,
-    language
+    provider
   } = options;
 
   const requestedTopics = Math.max(1, Math.min(maxTopics, 5));
@@ -1199,7 +1197,7 @@ export async function generateTopicsFromTranscript(
 
   let topicsArray = providerRetryResult.result?.topicsArray ?? [];
   const candidateTopics = providerRetryResult.result?.candidateTopics ?? [];
-  let resolvedModel =
+  const resolvedModel =
     providerRetryResult.result?.resolvedModel ??
     getProviderBackedTopicModel({
       provider: providerRetryResult.providerUsed,
