@@ -4,7 +4,7 @@ LongCut turns long-form YouTube videos into a structured learning workspace. Pas
 
 ## Overview
 
-The project is a Next.js 15 + React 19 application that wraps xAI’s Grok 4 Fast models (with optional Gemini adapters) and free YouTube transcript extraction with a polished UX. Supabase provides authentication, persistence, rate limiting, and profile preferences. The experience is optimized for fast iteration using Turbopack, Tailwind CSS v4, and shadcn/ui components.
+The project is a Next.js 15 + React 19 application that routes text generation through provider adapters for MiniMax, xAI Grok, and Google Gemini, plus free YouTube transcript extraction with a polished UX. Gemini also remains available for image generation. Supabase provides authentication, persistence, rate limiting, and profile preferences. The experience is optimized for fast iteration using Turbopack, Tailwind CSS v4, and shadcn/ui components.
 
 ## Feature Highlights
 
@@ -25,7 +25,7 @@ The project is a Next.js 15 + React 19 application that wraps xAI’s Grok 4 Fas
 
 - Frontend stack: Next.js 15 App Router, React 19, TypeScript, Tailwind CSS v4, shadcn/ui, lucide-react, sonner toasts.
 - Backend runtime: Next.js serverless route handlers with `withSecurity` middleware for CSRF, input validation (Zod), and rate caps.
-- AI pipeline: `lib/ai-processing.ts` and `lib/ai-client.ts` orchestrate provider-agnostic prompts, structured output schemas, fallback handling, and transcript chunking via `lib/ai-providers/`.
+- AI pipeline: `lib/ai-processing.ts` and `lib/ai-client.ts` orchestrate provider-agnostic prompts, structured output schemas, fallback handling, and transcript chunking via `lib/ai-providers/`, which currently includes MiniMax, Grok, and Gemini adapters.
 - Transcript & metadata: `/api/transcript` extracts public YouTube captions directly; `/api/video-info` fetches public video metadata from YouTube oEmbed with a minimal fallback.
 - Persistence: Supabase stores `video_analyses`, `user_videos` (history + favorites), `user_notes`, `profiles` (topic generation mode, profile data), and `rate_limits`.
 - Authentication: Supabase Auth with session refresh in `middleware.ts`; `AuthModal` drives sign-up prompts when limits are hit.
@@ -72,7 +72,7 @@ The project is a Next.js 15 + React 19 application that wraps xAI’s Grok 4 Fas
 ├── lib/
 │   ├── ai-client.ts            # Provider-agnostic AI entry point
 │   ├── ai-processing.ts        # Prompt building, transcript chunking, candidate pooling
-│   ├── ai-providers/           # Grok & Gemini adapters + registry
+│   ├── ai-providers/           # MiniMax, Grok, Gemini adapters + registry
 │   ├── notes-client.ts         # CSRF-protected note helpers
 │   ├── rate-limiter.ts         # Supabase-backed request limiting
 │   ├── security-middleware.ts  # Common security wrapper for route handlers
@@ -92,7 +92,7 @@ The project is a Next.js 15 + React 19 application that wraps xAI’s Grok 4 Fas
 
 - Node.js 18+ (Next.js 15 requires 18.18 or newer)
 - `npm` (repo uses package-lock.json), though `pnpm` or `yarn` also work
-- Supabase project (Auth + Postgres) and at least one AI provider key (xAI Grok recommended, Gemini optional)
+- Supabase project (Auth + Postgres), a MiniMax API key for text generation, and a Gemini API key if you want image generation enabled
 
 ### 1. Clone & Install
 
@@ -108,20 +108,27 @@ Create `.env.local` in the repo root:
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `XAI_API_KEY` | yes* | xAI Grok API key (`grok-4-1-fast-non-reasoning` by default) |
-| `GEMINI_API_KEY` | optional* | Google Gemini API key (enable if `AI_PROVIDER=gemini`) |
+| `MINIMAX_API_KEY` | yes* | MiniMax API key for text generation when `AI_PROVIDER=minimax` (recommended) |
+| `MINIMAX_API_BASE_URL` | optional | Override the MiniMax API base URL |
+| `XAI_API_KEY` | optional | xAI Grok API key for fallback or switching providers |
+| `GEMINI_API_KEY` | yes** | Google Gemini API key for `app/api/generate-image/route.ts`; also usable as a text provider |
 | `NEXT_PUBLIC_SUPABASE_URL` | yes | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | yes | Supabase anonymous key |
 | `CSRF_SALT` | yes | Long random string used to sign CSRF tokens |
-| `AI_PROVIDER` | optional | `grok` (default) or `gemini`; determines which adapter is used |
-| `AI_DEFAULT_MODEL` | optional | Override provider default model (e.g., `grok-4-1-fast-non-reasoning`) |
-| `NEXT_PUBLIC_AI_MODEL` | optional | Client-side override for display/config hints |
+| `AI_PROVIDER` | recommended | `minimax`, `grok`, or `gemini`; determines which server-side text provider adapter is used |
+| `NEXT_PUBLIC_AI_PROVIDER` | recommended | Set this to match `AI_PROVIDER` for consistent client/server provider behavior in Phase 1 |
+| `AI_DEFAULT_MODEL` | recommended | Override provider default model (for Phase 1, `MiniMax-M2.7`) |
+| `NEXT_PUBLIC_AI_MODEL` | optional | Client-side model hint for UI/config display; does not control server routing by itself |
 | `NEXT_PUBLIC_APP_URL` | optional | Canonical app URL (defaults to `http://localhost:3000`) |
 | `NEXT_PUBLIC_ENABLE_TRANSLATION_SELECTOR` | optional | Set to `true` to show the transcript translation dropdown (hidden otherwise) |
 | `YOUTUBE_API_KEY` | optional | Enables additional metadata when available |
 | `UNLIMITED_VIDEO_USERS` | optional | Comma-separated emails or user IDs allowed to bypass daily limits |
 
-<sup>\*</sup> At least one provider key (`XAI_API_KEY` or `GEMINI_API_KEY`) must be present. Set `AI_PROVIDER` if you prefer Gemini; otherwise Grok is used.
+<sup>\*</sup> For the Phase 1 rollout, set `AI_PROVIDER=minimax`, `NEXT_PUBLIC_AI_PROVIDER=minimax`, and provide `MINIMAX_API_KEY` for text generation. `XAI_API_KEY` is optional if you want Grok available as a fallback or alternate provider.
+
+<sup>\**</sup> `GEMINI_API_KEY` is still required if image generation should work, because `app/api/generate-image/route.ts` remains Gemini-backed.
+
+> Recommended Phase 1 setup: `AI_PROVIDER=minimax`, `NEXT_PUBLIC_AI_PROVIDER=minimax`, `AI_DEFAULT_MODEL=MiniMax-M2.7`, `MINIMAX_API_KEY=...`. Keep `GEMINI_API_KEY` set if you want image generation, and optionally keep `XAI_API_KEY` available for Grok fallback/testing.
 
 > Generate a unique `CSRF_SALT` (e.g., `openssl rand -base64 32`). `UNLIMITED_VIDEO_USERS` entries are normalized to lowercase.
 

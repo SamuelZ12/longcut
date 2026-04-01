@@ -84,12 +84,19 @@ function validateRequiredEnvVars(): ValidationResult {
 
   const preferredProvider =
     process.env.AI_PROVIDER ?? process.env.NEXT_PUBLIC_AI_PROVIDER ?? 'grok';
+  const hasMiniMaxKey = !!process.env.MINIMAX_API_KEY?.trim();
   const hasGrokKey = !!process.env.XAI_API_KEY?.trim();
   const hasGeminiKey = !!process.env.GEMINI_API_KEY?.trim();
 
-  if (!hasGrokKey && !hasGeminiKey) {
+  if (!hasMiniMaxKey && !hasGrokKey && !hasGeminiKey) {
     errors.push(
-      'Missing AI provider key: set XAI_API_KEY for Grok or GEMINI_API_KEY for Gemini.'
+      'Missing AI provider key: set MINIMAX_API_KEY for MiniMax, XAI_API_KEY for Grok, or GEMINI_API_KEY for Gemini.'
+    );
+  }
+
+  if (preferredProvider === 'minimax' && !hasMiniMaxKey) {
+    errors.push(
+      'AI_PROVIDER is set to "minimax" but MINIMAX_API_KEY is missing.'
     );
   }
 

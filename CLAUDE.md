@@ -56,10 +56,11 @@ The app uses Next.js 15 App Router with two main pages:
 #### Core Video Processing
 - `/api/transcript`: Fetches YouTube transcripts from public YouTube caption tracks
 - `/api/video-info`: Retrieves video metadata (title, author, duration, thumbnail)
-- `/api/generate-topics`: Creates highlight reels using Gemini (supports `smart`/`fast` mode + theme selection)
-- `/api/generate-summary`: Creates comprehensive video summary using Gemini
+- `/api/generate-topics`: Creates highlight reels through the configured text provider adapter (supports `smart`/`fast` mode + theme selection)
+- `/api/generate-summary`: Creates comprehensive video summaries through the configured text provider adapter
 - `/api/quick-preview`: Fast topic preview generation
 - `/api/top-quotes`: Extracts memorable quotes from transcript
+- `/api/generate-image`: Generates images with Gemini and still requires `GEMINI_API_KEY`
 
 #### AI & Chat
 - `/api/chat`: Powers context-aware AI chat with citation extraction
@@ -86,11 +87,13 @@ The app uses Next.js 15 App Router with two main pages:
 - **Multi-strategy Matching**: Falls back from exact → normalized → fuzzy matching
 - **Segment Mapping**: Maps text matches back to precise segment boundaries with character offsets
 
-#### AI Processing with Gemini (`lib/gemini-client.ts`)
-- **Model Cascade**: Automatically falls back through `gemini-2.5-flash-lite` → `gemini-2.5-flash` → `gemini-2.5-pro`
-- **Structured Output**: Converts Zod schemas to Gemini's schema format for type-safe responses
-- **Retry Logic**: Detects overload/rate limit errors (503, 429) and tries next model
-- **Timeout Handling**: Optional timeout support with graceful error handling
+#### AI Provider Routing (`lib/ai-client.ts`, `lib/ai-providers/`)
+- **Provider Adapters**: Text generation routes through provider adapters configured via `AI_PROVIDER` / `NEXT_PUBLIC_AI_PROVIDER`
+- **Current Providers**: MiniMax, Grok, and Gemini are available through the provider registry
+- **Provider Config**: `lib/ai-providers/provider-config.ts` normalizes provider keys, resolves the preferred provider, and falls back based on available credentials
+- **Structured Output**: Shared provider interfaces preserve type-safe prompt and response handling across adapters
+- **Retry Logic**: Provider-specific clients handle overload and rate-limit retries according to adapter behavior
+- **Timeout Handling**: Optional timeout support with graceful error handling across providers
 - **Topic Generation Modes**:
   - `smart`: High-quality analysis with candidate pool for theme-based exploration
   - `fast`: Quick initial highlights without candidate pool
@@ -316,9 +319,16 @@ The application uses aggressive parallel processing to minimize latency:
 
 ### Environment Variables
 Required in `.env.local`:
-- `GEMINI_API_KEY`: Google Gemini API key for AI generation
+- `MINIMAX_API_KEY`: MiniMax API key for text generation when `AI_PROVIDER=minimax`
 - `NEXT_PUBLIC_SUPABASE_URL`: Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase anonymous key
+
+Also commonly needed:
+- `AI_PROVIDER`: Server-side text provider selection (`minimax`, `grok`, or `gemini`)
+- `NEXT_PUBLIC_AI_PROVIDER`: Set this to match `AI_PROVIDER` for consistent client/server provider behavior in Phase 1
+- `AI_DEFAULT_MODEL`: Optional text model override (Phase 1 default: `MiniMax-M2.7`)
+- `NEXT_PUBLIC_AI_MODEL`: Optional client-side model hint; it does not select the server provider by itself
+- `GEMINI_API_KEY`: Still required for `app/api/generate-image/route.ts`
 
 ### Deployment
 Optimized for Vercel deployment with Next.js 15 and Turbopack for fast builds and hot module replacement.

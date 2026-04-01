@@ -98,11 +98,28 @@ export default function PrivacyPage() {
           .
         </p>
 
+        <h3 className="text-xl font-medium text-[#3f3f3f]">MiniMax</h3>
+        <p>
+          We primarily use MiniMax AI models for text-generation features such as video highlights, summaries,
+          suggested questions, and chat responses. To improve reliability, text requests may also be routed to another
+          configured text provider, such as Grok or Gemini, when fallback behavior is enabled. MiniMax&apos;s API
+          services are subject to their{' '}
+          <a
+            className="font-medium text-[#3f3f3f] underline underline-offset-4"
+            href="https://platform.minimax.io/protocol/privacy-policy"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            API Privacy Policy
+          </a>
+          .
+        </p>
+
         <h3 className="text-xl font-medium text-[#3f3f3f]">Google Gemini</h3>
         <p>
-          We use Google&apos;s Gemini AI models to generate video highlights, summaries, and chat responses. Video
-          transcripts and your questions are sent to Gemini for processing. Google&apos;s AI services are subject to
-          their{' '}
+          We use Google&apos;s Gemini models for image-generation features. If you generate images through LongCut,
+          the relevant prompts and request metadata are sent to Gemini for processing. Google&apos;s AI services are
+          subject to their{' '}
           <a
             className="font-medium text-[#3f3f3f] underline underline-offset-4"
             href="https://policies.google.com/privacy"
