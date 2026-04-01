@@ -79,6 +79,14 @@ interface RetryProviderBackedTopicGenerationOptions<T> {
   isUsableResult: (result: T | undefined) => boolean;
 }
 
+interface ProviderBackedTopicModelOptions {
+  provider: ProviderKey;
+  mode: TopicGenerationMode;
+  transcript: TranscriptSegment[];
+  fastModel?: string;
+  proModel?: string;
+}
+
 function chunkTranscript(
   segments: TranscriptSegment[],
   chunkDurationSeconds: number,
@@ -649,6 +657,26 @@ function formatTime(seconds: number): string {
     .padStart(2, '0')}`;
 }
 
+export function getProviderBackedTopicModel(
+  options: ProviderBackedTopicModelOptions
+): string {
+  const providerModelDefaults = getProviderModelDefaults(options.provider);
+  const fastModel = options.fastModel ?? providerModelDefaults.fastModel;
+  const proModel = options.proModel ?? providerModelDefaults.proModel;
+  const videoDurationSeconds =
+    options.transcript.length > 0
+      ? options.transcript[options.transcript.length - 1].start +
+        options.transcript[options.transcript.length - 1].duration
+      : 0;
+  const isShortVideo = videoDurationSeconds <= 30 * 60;
+
+  if (options.mode !== 'smart') {
+    return fastModel;
+  }
+
+  return isShortVideo ? fastModel : proModel;
+}
+
 function filterExcludedTopics(
   topics: ParsedTopic[],
   excludedKeys: Set<string>
@@ -758,7 +786,13 @@ async function generateProviderBackedTopicsFromTranscript(
         transcript[transcript.length - 1].duration
       : 0;
   const isShortVideo = videoDurationSeconds <= 30 * 60;
-  const smartModeModel = isShortVideo ? fastModel : proModel;
+  const smartModeModel = getProviderBackedTopicModel({
+    provider,
+    mode,
+    transcript,
+    fastModel,
+    proModel
+  });
 
   let topicsArray: ParsedTopic[] = [];
   let candidateTopics: CandidateTopic[] = [];
@@ -1167,9 +1201,13 @@ export async function generateTopicsFromTranscript(
   const candidateTopics = providerRetryResult.result?.candidateTopics ?? [];
   let resolvedModel =
     providerRetryResult.result?.resolvedModel ??
-    getProviderModelDefaults(providerRetryResult.providerUsed)[
-      mode === 'smart' ? 'proModel' : 'fastModel'
-    ];
+    getProviderBackedTopicModel({
+      provider: providerRetryResult.providerUsed,
+      mode,
+      transcript,
+      fastModel: options.fastModel,
+      proModel: options.proModel
+    });
 
   if (topicsArray.length === 0) {
     console.warn(

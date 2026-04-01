@@ -115,6 +115,10 @@ export async function generateStructuredContent(
   try {
     return await primaryAdapter.generate(rest);
   } catch (error) {
+    if (provider) {
+      throw error;
+    }
+
     // If the error is retryable and we have a fallback provider, try it
     if (isRetryableError(error)) {
       const fallbackKey = getFallbackProvider(primaryKey);
