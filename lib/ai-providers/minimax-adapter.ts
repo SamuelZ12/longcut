@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { ProviderAdapter, ProviderGenerateParams, ProviderGenerateResult } from './types';
 
 const PROVIDER_NAME = 'minimax';
@@ -81,13 +82,75 @@ function normalizeUsage(raw: any, latencyMs: number | undefined) {
   };
 }
 
+function ensureSchemaName(name?: string) {
+  if (name && name.trim().length > 0) {
+    return name.trim();
+  }
+
+  return 'ResponseSchema';
+}
+
+function buildPrompt(params: ProviderGenerateParams): string {
+  if (!params.zodSchema) {
+    return params.prompt;
+  }
+
+  let schemaText = '{}';
+
+  try {
+    schemaText = JSON.stringify(z.toJSONSchema(params.zodSchema));
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? `Failed to convert schema: ${error.message}`
+        : 'Failed to convert schema'
+    );
+  }
+
+  return `${params.prompt}\n\nReturn strict JSON only that matches the ${ensureSchemaName(
+    params.schemaName
+  )} schema below. Do not include markdown fences, explanations, or extra text.\nSchema: ${schemaText}`;
+}
+
+function normalizeStructuredContent(
+  content: string,
+  params: ProviderGenerateParams
+): string {
+  if (!params.zodSchema) {
+    return content;
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? `MiniMax structured output validation failed: ${error.message}`
+        : 'MiniMax structured output validation failed.'
+    );
+  }
+
+  try {
+    const validated = params.zodSchema.parse(parsed);
+    return JSON.stringify(validated);
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? `MiniMax structured output validation failed: ${error.message}`
+        : 'MiniMax structured output validation failed.'
+    );
+  }
+}
+
 function buildPayload(params: ProviderGenerateParams) {
   const payload: Record<string, unknown> = {
     model: params.model ?? DEFAULT_MODEL,
     messages: [
       {
         role: 'user',
-        content: params.prompt,
+        content: buildPrompt(params),
       },
     ],
     reasoning_split: true,
@@ -189,7 +252,10 @@ export function createMiniMaxAdapter(): ProviderAdapter {
 
         const latencyMs = Date.now() - requestStartedAt;
         const choice = Array.isArray(parsed?.choices) ? parsed.choices[0] : undefined;
-        const content = stripReasoningBlocks(extractTextFromChoice(choice));
+        const content = normalizeStructuredContent(
+          stripReasoningBlocks(extractTextFromChoice(choice)),
+          params
+        );
 
         if (!content) {
           throw new Error('MiniMax API returned an empty response.');

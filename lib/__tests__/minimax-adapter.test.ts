@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { z } from 'zod';
 
 import { createMiniMaxAdapter } from '../ai-providers/minimax-adapter';
 
@@ -100,6 +101,48 @@ test('MiniMax adapter maps 429 base_resp 1002 to retryable rate-limit wording', 
             return true;
           }
         );
+      }
+    );
+  });
+});
+
+test('MiniMax adapter uses prompt-based schema compatibility when zodSchema is provided', async () => {
+  await withEnv({ MINIMAX_API_KEY: 'test-key' }, async () => {
+    let requestBody: any;
+
+    await withMockFetch(
+      async (_input, init) => {
+        requestBody = JSON.parse(String(init?.body));
+
+        return new Response(
+          JSON.stringify({
+            model: 'MiniMax-M2.7',
+            choices: [
+              {
+                message: {
+                  content: '<think>hidden reasoning</think>{"title":"MiniMax"}',
+                },
+              },
+            ],
+          }),
+          { status: 200 }
+        );
+      },
+      async () => {
+        const adapter = createMiniMaxAdapter();
+        const result = await adapter.generate({
+          prompt: 'Return a title object',
+          schemaName: 'TopicTitle',
+          zodSchema: z.object({
+            title: z.string(),
+          }),
+        });
+
+        assert.match(requestBody.messages[0].content, /Return a title object/);
+        assert.match(requestBody.messages[0].content, /TopicTitle/);
+        assert.match(requestBody.messages[0].content, /Return strict JSON/i);
+        assert.match(requestBody.messages[0].content, /"title"/);
+        assert.equal(result.content, '{"title":"MiniMax"}');
       }
     );
   });

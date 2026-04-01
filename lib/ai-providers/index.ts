@@ -10,6 +10,7 @@ export {
   getProviderBehavior,
   getProviderDefaultModel,
   getProviderFallbackOrder,
+  getProviderModelDefaults,
   normalizeProviderKey,
 } from './provider-config';
 export { availableProviders, generateStructuredContent, getProvider, getProviderKey } from './registry';

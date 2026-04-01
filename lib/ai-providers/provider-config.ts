@@ -40,6 +40,24 @@ export function getProviderDefaultModel(key: ProviderKey): string {
   return PROVIDER_DEFAULT_MODELS[key];
 }
 
+export function getProviderModelDefaults(preferred?: string): {
+  defaultModel: string;
+  fastModel: string;
+  proModel: string;
+} {
+  const providerKey = getConfiguredProviderKey(preferred) ?? 'grok';
+  const defaultModel =
+    process.env.AI_DEFAULT_MODEL ?? getProviderDefaultModel(providerKey);
+  const fastModel = process.env.AI_FAST_MODEL ?? defaultModel;
+  const proModel = process.env.AI_PRO_MODEL ?? fastModel;
+
+  return {
+    defaultModel,
+    fastModel,
+    proModel,
+  };
+}
+
 export function getProviderBehavior(key: ProviderKey): ProviderBehavior {
   return PROVIDER_BEHAVIORS[key];
 }

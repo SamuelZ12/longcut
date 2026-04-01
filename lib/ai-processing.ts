@@ -12,7 +12,11 @@ import {
   TranscriptIndex
 } from '@/lib/quote-matcher';
 import { generateAIResponse } from '@/lib/ai-client';
-import { getProviderBehavior, getProviderKey } from '@/lib/ai-providers';
+import {
+  getProviderBehavior,
+  getProviderKey,
+  getProviderModelDefaults,
+} from '@/lib/ai-providers';
 import { topicGenerationSchema } from '@/lib/schemas';
 import { parseTimestampRange } from '@/lib/timestamp-utils';
 import { getLanguageName } from '@/lib/language-utils';
@@ -26,13 +30,6 @@ interface ParsedTopic {
     text: string;
   };
 }
-
-const DEFAULT_AI_MODEL =
-  process.env.AI_DEFAULT_MODEL ?? 'grok-4-1-fast-non-reasoning';
-const FAST_MODEL_DEFAULT =
-  process.env.AI_FAST_MODEL ?? DEFAULT_AI_MODEL;
-const PRO_MODEL_DEFAULT =
-  process.env.AI_PRO_MODEL ?? FAST_MODEL_DEFAULT;
 
 interface GenerateTopicsOptions {
   videoInfo?: Partial<VideoInfo>;
@@ -784,16 +781,16 @@ export async function generateTopicsFromTranscript(
   modelUsed: string;
 }> {
   const {
+    fastModel = getProviderModelDefaults().fastModel,
     videoInfo,
     chunkDurationSeconds = DEFAULT_CHUNK_DURATION_SECONDS,
     chunkOverlapSeconds = DEFAULT_CHUNK_OVERLAP_SECONDS,
-    fastModel = FAST_MODEL_DEFAULT,
     maxTopics = 5,
     theme,
     excludeTopicKeys,
     includeCandidatePool,
     mode = 'smart',
-    proModel = PRO_MODEL_DEFAULT,
+    proModel = getProviderModelDefaults().proModel,
     language
   } = options;
 
@@ -1386,7 +1383,7 @@ function promoteDistinctThemes(themes: string[], primaryCount = 3): string[] {
 export async function generateThemesFromTranscript(
   transcript: TranscriptSegment[],
   videoInfo?: Partial<VideoInfo>,
-  model: string = FAST_MODEL_DEFAULT,
+  model: string = getProviderModelDefaults().fastModel,
   language?: string
 ): Promise<string[]> {
   if (!transcript || transcript.length === 0) {
