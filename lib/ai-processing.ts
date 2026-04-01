@@ -12,7 +12,7 @@ import {
   TranscriptIndex
 } from '@/lib/quote-matcher';
 import { generateAIResponse } from '@/lib/ai-client';
-import { getProviderKey } from '@/lib/ai-providers';
+import { getProviderBehavior, getProviderKey } from '@/lib/ai-providers';
 import { topicGenerationSchema } from '@/lib/schemas';
 import { parseTimestampRange } from '@/lib/timestamp-utils';
 import { getLanguageName } from '@/lib/language-utils';
@@ -798,7 +798,8 @@ export async function generateTopicsFromTranscript(
   } = options;
 
   const providerKey = getProviderKey();
-  const forceFullTranscript = providerKey === 'grok';
+  const forceFullTranscript =
+    getProviderBehavior(providerKey).forceFullTranscriptTopicGeneration;
   const requestedTopics = Math.max(1, Math.min(maxTopics, 5));
   const isSmartMode = mode === 'smart';
   const fullText = combineTranscript(transcript);

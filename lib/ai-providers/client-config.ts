@@ -1,15 +1,10 @@
-type ClientProviderKey = 'grok' | 'gemini';
+import { normalizeProviderKey } from './provider-config';
+import type { ProviderKey } from './types';
+
+type ClientProviderKey = ProviderKey;
 
 function resolveClientProviderKey(): ClientProviderKey {
-  const rawProvider = process.env.NEXT_PUBLIC_AI_PROVIDER;
-  const normalized =
-    typeof rawProvider === 'string' ? rawProvider.trim().toLowerCase() : undefined;
-
-  if (normalized === 'gemini') {
-    return 'gemini';
-  }
-
-  return 'grok';
+  return normalizeProviderKey(process.env.NEXT_PUBLIC_AI_PROVIDER) ?? 'grok';
 }
 
 export function getClientProviderKey(): ClientProviderKey {
@@ -19,4 +14,3 @@ export function getClientProviderKey(): ClientProviderKey {
 export function isGrokProviderOnClient(): boolean {
   return resolveClientProviderKey() === 'grok';
 }
-

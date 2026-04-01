@@ -1,5 +1,11 @@
 import type { ZodTypeAny } from 'zod';
 
+export type ProviderKey = 'grok' | 'gemini' | 'minimax';
+
+export interface ProviderBehavior {
+  forceFullTranscriptTopicGeneration: boolean;
+}
+
 export interface ProviderGenerateParams {
   prompt: string;
   model?: string;
@@ -30,4 +36,3 @@ export interface ProviderAdapter {
   readonly defaultModel: string;
   generate(params: ProviderGenerateParams): Promise<ProviderGenerateResult>;
 }
-

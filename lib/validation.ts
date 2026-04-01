@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import { STRICT_TIMESTAMP_RANGE_REGEX } from '@/lib/timestamp-utils';
+import {
+  getConfiguredProviderKey,
+  getProviderDefaultModel,
+} from '@/lib/ai-providers/provider-config';
 
 // Shared regex
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -88,7 +92,8 @@ export const topicSchema = z.object({
 });
 
 const DEFAULT_AI_VALIDATION_MODEL =
-  process.env.AI_DEFAULT_MODEL ?? 'grok-4-1-fast-non-reasoning';
+  process.env.AI_DEFAULT_MODEL ??
+  getProviderDefaultModel(getConfiguredProviderKey() ?? 'grok');
 
 // Model selection validation
 export const modelSchema = z

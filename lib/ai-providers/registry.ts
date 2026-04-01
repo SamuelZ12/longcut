@@ -1,38 +1,45 @@
 import { createGeminiAdapter } from './gemini-adapter';
 import { createGrokAdapter } from './grok-adapter';
-import type { ProviderAdapter, ProviderGenerateParams, ProviderGenerateResult } from './types';
-
-type ProviderKey = 'grok' | 'gemini';
+import { createMiniMaxAdapter } from './minimax-adapter';
+import {
+  getConfiguredProviderKey,
+  getProviderFallbackOrder,
+  getProviderPriorityOrder,
+} from './provider-config';
+import type {
+  ProviderAdapter,
+  ProviderGenerateParams,
+  ProviderGenerateResult,
+  ProviderKey,
+} from './types';
 
 type ProviderFactory = () => ProviderAdapter;
 
 const providerFactories: Record<ProviderKey, ProviderFactory> = {
   grok: createGrokAdapter,
   gemini: createGeminiAdapter,
+  minimax: createMiniMaxAdapter,
 };
 
 const providerEnvGuards: Record<ProviderKey, () => string | undefined> = {
   grok: () => process.env.XAI_API_KEY,
   gemini: () => process.env.GEMINI_API_KEY,
+  minimax: () => process.env.MINIMAX_API_KEY,
 };
 
 const providerCache: Partial<Record<ProviderKey, ProviderAdapter>> = {};
 
 function resolveProviderKey(preferred?: string): ProviderKey {
-  const envPreference =
-    preferred ??
-    process.env.AI_PROVIDER ??
-    process.env.NEXT_PUBLIC_AI_PROVIDER;
+  const envPreference = getConfiguredProviderKey(preferred);
 
-  if (envPreference && envPreference in providerFactories) {
-    return envPreference as ProviderKey;
+  if (envPreference) {
+    return envPreference;
   }
 
-  if (providerEnvGuards.grok()) {
-    return 'grok';
-  }
-  if (providerEnvGuards.gemini()) {
-    return 'gemini';
+  for (const key of getProviderPriorityOrder()) {
+    if (providerEnvGuards[key]()) {
+      return key;
+    }
   }
 
   return 'grok';
@@ -81,7 +88,10 @@ function isRetryableError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   const lowerMessage = message.toLowerCase();
   return (
+    lowerMessage.includes('rate limit') ||
+    lowerMessage.includes('429') ||
     lowerMessage.includes('service unavailable') ||
+    lowerMessage.includes('500') ||
     lowerMessage.includes('503') ||
     lowerMessage.includes('502') ||
     lowerMessage.includes('504') ||
@@ -91,8 +101,7 @@ function isRetryableError(error: unknown): boolean {
 }
 
 function getFallbackProvider(currentKey: ProviderKey): ProviderKey | null {
-  const available = availableProviders();
-  const fallback = available.find((key) => key !== currentKey);
+  const fallback = getProviderFallbackOrder(currentKey, availableProviders())[0];
   return fallback ?? null;
 }
 
@@ -127,4 +136,3 @@ export async function generateStructuredContent(
     throw error;
   }
 }
-
