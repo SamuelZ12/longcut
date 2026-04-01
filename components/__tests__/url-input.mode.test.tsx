@@ -58,3 +58,15 @@ test('UrlInput shows mode selector when Gemini does not force smart mode on the 
     assert.match(markup, />Fast</);
   });
 });
+
+test('UrlInput shows mode selector when NEXT_PUBLIC_AI_PROVIDER is absent', () => {
+  withEnv({ NEXT_PUBLIC_AI_PROVIDER: undefined }, () => {
+    const { UrlInput } = loadUrlInput();
+    const markup = renderToStaticMarkup(
+      <UrlInput onSubmit={() => {}} mode="fast" onModeChange={() => {}} />
+    );
+
+    assert.match(markup, /data-slot="select-trigger"/);
+    assert.match(markup, />Fast</);
+  });
+});

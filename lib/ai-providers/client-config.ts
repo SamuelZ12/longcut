@@ -15,5 +15,13 @@ export function getClientProviderKey(): ClientProviderKey {
 }
 
 export function shouldForceSmartModeOnClient(): boolean {
-  return getProviderBehavior(resolveClientProviderKey()).forceSmartModeOnClient;
+  const configuredClientProvider = normalizeProviderKey(
+    process.env.NEXT_PUBLIC_AI_PROVIDER
+  );
+
+  if (!configuredClientProvider) {
+    return false;
+  }
+
+  return getProviderBehavior(configuredClientProvider).forceSmartModeOnClient;
 }
