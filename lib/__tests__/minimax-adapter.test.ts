@@ -147,3 +147,49 @@ test('MiniMax adapter uses prompt-based schema compatibility when zodSchema is p
     );
   });
 });
+
+test('MiniMax adapter coerces metadata values to strings for API compatibility', async () => {
+  await withEnv({ MINIMAX_API_KEY: 'test-key' }, async () => {
+    let requestBody: any;
+
+    await withMockFetch(
+      async (_input, init) => {
+        requestBody = JSON.parse(String(init?.body));
+
+        return new Response(
+          JSON.stringify({
+            model: 'MiniMax-M2.7',
+            choices: [
+              {
+                message: {
+                  content: '[OUTPUT_0]translated[/OUTPUT_0]',
+                },
+              },
+            ],
+          }),
+          { status: 200 }
+        );
+      },
+      async () => {
+        const adapter = createMiniMaxAdapter();
+
+        await adapter.generate({
+          prompt: 'Translate this text',
+          metadata: {
+            operation: 'translation',
+            textCount: 2,
+            attempt: 1,
+            structured: true,
+          },
+        });
+
+        assert.deepEqual(requestBody.metadata, {
+          operation: 'translation',
+          textCount: '2',
+          attempt: '1',
+          structured: 'true',
+        });
+      }
+    );
+  });
+});

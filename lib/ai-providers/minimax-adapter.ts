@@ -90,6 +90,26 @@ function ensureSchemaName(name?: string) {
   return 'ResponseSchema';
 }
 
+function normalizeMetadata(metadata: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(metadata).flatMap(([key, value]) => {
+      if (value === undefined) {
+        return [];
+      }
+
+      if (typeof value === 'string') {
+        return [[key, value]];
+      }
+
+      if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
+        return [[key, String(value)]];
+      }
+
+      return [[key, JSON.stringify(value)]];
+    })
+  );
+}
+
 function buildPrompt(params: ProviderGenerateParams): string {
   if (!params.zodSchema) {
     return params.prompt;
@@ -169,7 +189,7 @@ function buildPayload(params: ProviderGenerateParams) {
   }
 
   if (params.metadata) {
-    payload.metadata = params.metadata;
+    payload.metadata = normalizeMetadata(params.metadata);
   }
 
   return payload;
