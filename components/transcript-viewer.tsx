@@ -578,7 +578,7 @@ export function TranscriptViewer({
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') navigateSearch('next');
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) navigateSearch('next');
                     if (e.key === 'Escape') {
                       setIsSearchOpen(false);
                       setSearchQuery("");
