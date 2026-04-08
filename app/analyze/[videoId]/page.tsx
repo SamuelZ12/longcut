@@ -14,7 +14,7 @@ import { Topic, TranscriptSegment, VideoInfo, Citation, PlaybackCommand, Note, N
 import { normalizeWhitespace } from "@/lib/quote-matcher";
 import { hydrateTopicsWithTranscript, normalizeTranscript } from "@/lib/topic-utils";
 import { SelectionActionPayload, EXPLAIN_SELECTION_EVENT } from "@/components/selection-actions";
-import { fetchNotes, saveNote } from "@/lib/notes-client";
+import { fetchNotes, saveNote, deleteNote } from "@/lib/notes-client";
 import { EditingNote } from "@/components/notes-panel";
 import { useModePreference } from "@/lib/hooks/use-mode-preference";
 import { useTranslation } from "@/lib/hooks/use-translation";
@@ -1821,6 +1821,17 @@ export default function AnalyzePage() {
     }
   }, [videoId, videoDbId, user, promptSignInForNotes]);
 
+  const handleDeleteNote = useCallback(async (noteId: string) => {
+    try {
+      await deleteNote(noteId);
+      setNotes((prev) => prev.filter((n) => n.id !== noteId));
+      toast.success("Note deleted");
+    } catch (error) {
+      console.error("Failed to delete note", error);
+      toast.error("Failed to delete note");
+    }
+  }, []);
+
   const handleTakeNoteFromSelection = useCallback((payload: SelectionActionPayload) => {
     if (!user) {
       promptSignInForNotes();
@@ -2104,6 +2115,7 @@ export default function AnalyzePage() {
                   onSaveEditingNote={handleSaveEditingNote}
                   onCancelEditing={handleCancelEditing}
                   onAddNote={handleAddNote}
+                  onDeleteNote={handleDeleteNote}
                   isAuthenticated={!!user}
                   onRequestSignIn={handleAuthRequired}
                   selectedLanguage={selectedLanguage}

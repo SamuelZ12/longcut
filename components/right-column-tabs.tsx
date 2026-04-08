@@ -57,6 +57,7 @@ interface RightColumnTabsProps {
     isLoading?: boolean;
   };
   onAddNote?: () => void;
+  onDeleteNote?: (noteId: string) => Promise<void>;
 }
 
 export interface RightColumnTabsHandle {
@@ -94,7 +95,8 @@ export const RightColumnTabs = forwardRef<RightColumnTabsHandle, RightColumnTabs
   currentSourceLanguage,
   onRequestExport,
   exportButtonState,
-  onAddNote
+  onAddNote,
+  onDeleteNote
 }, ref) => {
   const [activeTab, setActiveTab] = useState<"transcript" | "chat" | "notes">("transcript");
   const showTranslationSelector = translationSelectorEnabled;
@@ -243,6 +245,7 @@ export const RightColumnTabs = forwardRef<RightColumnTabsHandle, RightColumnTabs
               currentTime={currentTime}
               onTimestampClick={onTimestampClick}
               onAddNote={onAddNote}
+              onDeleteNote={onDeleteNote}
             />
           </TooltipProvider>
         </div>
