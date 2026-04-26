@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import React, { useRef } from "react";
 import { Topic, TranscriptSegment, TranslationRequestHandler } from "@/lib/types";
 import { getTopicHSLColor } from "@/lib/utils";
 import { TopicCard } from "@/components/topic-card";

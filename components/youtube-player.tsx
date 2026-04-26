@@ -28,6 +28,28 @@ interface YouTubePlayerProps {
   onRequestTranslation?: TranslationRequestHandler;
 }
 
+type YouTubePlayerVars = {
+  autoplay: 0;
+  controls: 1;
+  modestbranding: 1;
+  rel: 0;
+  origin?: string;
+};
+
+export function getYouTubePlayerVars(origin?: string | null): YouTubePlayerVars {
+  return {
+    autoplay: 0,
+    controls: 1,
+    modestbranding: 1,
+    rel: 0,
+    ...(origin ? { origin } : {}),
+  };
+}
+
+export function shouldRenderHighlightTimeline(videoDuration: number, topicCount: number) {
+  return videoDuration > 0 && topicCount > 0;
+}
+
 export function YouTubePlayer({
   videoId,
   selectedTopic,
@@ -88,12 +110,7 @@ export function YouTubePlayer({
 
       player = new (window as any).YT.Player("youtube-player", {
         videoId: videoId,
-        playerVars: {
-          autoplay: 0,
-          controls: 1,
-          modestbranding: 1,
-          rel: 0,
-        },
+        playerVars: getYouTubePlayerVars(window.location.origin),
         events: {
           onReady: (event: { target: any }) => {
             if (!mounted) return;
@@ -167,6 +184,11 @@ export function YouTubePlayer({
               }
             }
           },
+          onError: (event: { data: number }) => {
+            if (process.env.NODE_ENV !== 'production') {
+              console.warn('YouTube player error', { code: event.data, videoId });
+            }
+          },
         },
       });
     };
@@ -212,7 +234,18 @@ export function YouTubePlayer({
 
   // Centralized command executor
   useEffect(() => {
-    if (!playbackCommand || !playerRef.current || !playerReady) return;
+    if (!playbackCommand) return;
+
+    if (!playerRef.current || !playerReady) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('Skipping playback command until YouTube player is ready', {
+          command: playbackCommand.type,
+          hasPlayer: Boolean(playerRef.current),
+          playerReady,
+        });
+      }
+      return;
+    }
 
     const executeCommand = () => {
       switch (playbackCommand.type) {
@@ -418,7 +451,7 @@ export function YouTubePlayer({
 
         {renderControls && (
           <div className="p-3 bg-background border-t flex-shrink-0">
-            {videoDuration > 0 && (
+            {shouldRenderHighlightTimeline(videoDuration, topics.length) && (
               <VideoProgressBar
                 videoDuration={videoDuration}
                 currentTime={currentTime}

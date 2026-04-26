@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Topic, TranslationRequestHandler } from "@/lib/types";
 import { formatDuration, getTopicHSLColor } from "@/lib/utils";
 import { cn } from "@/lib/utils";
