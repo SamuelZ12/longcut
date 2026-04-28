@@ -17,8 +17,6 @@ test('right column height recalculates when transcript workspace becomes visible
   assert.match(effectSource, /requestAnimationFrame/);
   assert.match(effectSource, /transcript\.length/);
   assert.match(effectSource, /pageState/);
-  assert.match(effectSource, /videoDuration/);
-  assert.match(effectSource, /topics\.length/);
 });
 
 test('right column has a defensive minimum height before measurement completes', () => {
@@ -27,4 +25,21 @@ test('right column has a defensive minimum height before measurement completes',
 
   const containerSource = pageSource.slice(containerStart, containerStart + 500);
   assert.match(containerSource, /minHeight:\s*420/);
+});
+
+test('youtube player remounts when the analyzed video changes', () => {
+  const playerStart = pageSource.indexOf('<YouTubePlayer\n');
+  assert.notEqual(playerStart, -1, 'Expected YouTubePlayer render to exist');
+
+  const playerSource = pageSource.slice(playerStart, playerStart + 600);
+  assert.match(playerSource, /key=\{videoId\}/);
+});
+
+test('transcript seeks try the current youtube player before queuing a command', () => {
+  const requestSeekStart = pageSource.indexOf('const requestSeek = useCallback');
+  assert.notEqual(requestSeekStart, -1, 'Expected requestSeek callback to exist');
+
+  const requestSeekSource = pageSource.slice(requestSeekStart, requestSeekStart + 300);
+  assert.match(requestSeekSource, /youtubePlayerRef\.current\?\.seekTo\(time\)/);
+  assert.match(requestSeekSource, /setPlaybackCommand\(\{ type: 'SEEK', time \}\)/);
 });

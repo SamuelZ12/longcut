@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { RightColumnTabs, type RightColumnTabsHandle } from "@/components/right-column-tabs";
-import { YouTubePlayer } from "@/components/youtube-player";
+import { YouTubePlayer, type YouTubePlayerHandle } from "@/components/youtube-player";
 import { HighlightsPanel } from "@/components/highlights-panel";
 import { ThemeSelector } from "@/components/theme-selector";
 import { LoadingContext } from "@/components/loading-context";
@@ -222,6 +222,7 @@ export default function AnalyzePage() {
   const [generationStartTime, setGenerationStartTime] = useState<number | null>(null);
   const [processingStartTime, setProcessingStartTime] = useState<number | null>(null);
   const rightColumnTabsRef = useRef<RightColumnTabsHandle>(null);
+  const youtubePlayerRef = useRef<YouTubePlayerHandle | null>(null);
   const abortManager = useRef(new AbortManager());
   const selectedThemeRef = useRef<string | null>(null);
   const seoPathRef = useRef<string | null>(null);
@@ -398,6 +399,10 @@ export default function AnalyzePage() {
 
   // Centralized playback request functions
   const requestSeek = useCallback((time: number) => {
+    if (youtubePlayerRef.current?.seekTo(time)) {
+      return;
+    }
+
     setPlaybackCommand({ type: 'SEEK', time });
   }, []);
 
@@ -1618,7 +1623,7 @@ export default function AnalyzePage() {
       window.removeEventListener("resize", adjustRightColumnHeight);
       resizeObserver.disconnect();
     };
-  }, [videoId, transcript.length, pageState, videoDuration, topics.length]); // Re-run when workspace or left-column height changes
+  }, [videoId, transcript.length, pageState]); // Re-run when the workspace first mounts or changes videos
 
   const [notes, setNotes] = useState<Note[]>([]);
   const [, setIsLoadingNotes] = useState(false);
@@ -1883,6 +1888,8 @@ export default function AnalyzePage() {
             <div className="lg:col-span-2">
               <div className="sticky top-[6.5rem] space-y-3.5" id="video-container">
                 <YouTubePlayer
+                  key={videoId}
+                  ref={youtubePlayerRef}
                   videoId={videoId}
                   selectedTopic={selectedTopic}
                   playbackCommand={playbackCommand}

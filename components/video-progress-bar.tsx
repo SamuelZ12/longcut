@@ -21,6 +21,14 @@ interface VideoProgressBarProps {
   onRequestTranslation?: TranslationRequestHandler;
 }
 
+export function normalizeDensityBuckets(density: number[]) {
+  const maxDensity = Math.max(...density);
+  if (maxDensity === 0) {
+    return density;
+  }
+  return density.map((d) => d / maxDensity);
+}
+
 export function VideoProgressBar({
   videoDuration,
   currentTime,
@@ -75,8 +83,7 @@ export function VideoProgressBar({
       });
     });
 
-    const maxDensity = Math.max(...density);
-    return density.map((d) => d / maxDensity);
+    return normalizeDensityBuckets(density);
   };
 
   const density = calculateDensity();
