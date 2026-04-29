@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import React, { useRef } from "react";
 import { Topic, TranscriptSegment, TranslationRequestHandler } from "@/lib/types";
 import { getTopicHSLColor } from "@/lib/utils";
 import { TopicCard } from "@/components/topic-card";
@@ -19,6 +19,14 @@ interface VideoProgressBarProps {
   videoId?: string;
   selectedLanguage?: string | null;
   onRequestTranslation?: TranslationRequestHandler;
+}
+
+export function normalizeDensityBuckets(density: number[]) {
+  const maxDensity = Math.max(...density);
+  if (maxDensity === 0) {
+    return density;
+  }
+  return density.map((d) => d / maxDensity);
 }
 
 export function VideoProgressBar({
@@ -75,8 +83,7 @@ export function VideoProgressBar({
       });
     });
 
-    const maxDensity = Math.max(...density);
-    return density.map((d) => d / maxDensity);
+    return normalizeDensityBuckets(density);
   };
 
   const density = calculateDensity();

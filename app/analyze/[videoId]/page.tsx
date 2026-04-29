@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { RightColumnTabs, type RightColumnTabsHandle } from "@/components/right-column-tabs";
-import { YouTubePlayer } from "@/components/youtube-player";
+import { YouTubePlayer, type YouTubePlayerHandle } from "@/components/youtube-player";
 import { HighlightsPanel } from "@/components/highlights-panel";
 import { ThemeSelector } from "@/components/theme-selector";
 import { LoadingContext } from "@/components/loading-context";
@@ -24,6 +24,13 @@ import { useTranscriptExport } from "@/lib/hooks/use-transcript-export";
 // Page state for better UX
 type PageState = 'IDLE' | 'ANALYZING_NEW' | 'LOADING_CACHED';
 type AuthModalTrigger = 'generation-limit' | 'save-video' | 'manual' | 'save-note';
+type CachedHighlightPayload = {
+  videoId: string;
+  videoDbId?: string | null;
+  topics: Topic[];
+  themes?: string[];
+  topicCandidates?: TopicCandidate[];
+};
 import { buildVideoSlug, extractVideoId } from "@/lib/utils";
 import { getLanguageName } from "@/lib/language-utils";
 import { NO_CREDITS_USED_MESSAGE } from "@/lib/no-credits-message";
@@ -66,24 +73,6 @@ type LimitCheckResponse = {
   } | null;
 };
 
-
-function buildLimitExceededMessage(limitData?: LimitCheckResponse | null): string {
-  if (!limitData) {
-    return AUTH_LIMIT_MESSAGE;
-  }
-
-  if (limitData.reason === 'SUBSCRIPTION_INACTIVE') {
-    return 'Your subscription is not active. Visit the billing portal to reactivate and continue generating videos.';
-  }
-
-  if (limitData.tier === 'pro') {
-    return limitData.requiresTopup
-      ? 'You have used all Pro videos this period. Purchase a Top-Up (+20 videos for $2.99) or wait for your next billing cycle.'
-      : 'You have used your Pro allowance. Wait for your next billing cycle to reset.';
-  }
-
-  return AUTH_LIMIT_MESSAGE;
-}
 
 function normalizeErrorMessage(message: string | undefined, fallback: string = DEFAULT_CLIENT_ERROR): string {
   const trimmed = typeof message === "string" ? message.trim() : "";
@@ -196,7 +185,7 @@ export default function AnalyzePage() {
       : 'IDLE'
   );
   const hasAttemptedLinking = useRef(false);
-  const [loadingStage, setLoadingStage] = useState<'fetching' | 'understanding' | 'generating' | 'processing' | null>(null);
+  const [loadingStage, setLoadingStage] = useState<'fetching' | 'understanding' | null>(null);
   const { mode, isLoading: isModeLoading } = useModePreference();
   const [error, setError] = useState("");
   const [isRateLimitError, setIsRateLimitError] = useState(false);
@@ -224,6 +213,9 @@ export default function AnalyzePage() {
     return keys;
   }, [baseTopics]);
   const [isLoadingThemeTopics, setIsLoadingThemeTopics] = useState(false);
+  const [isGeneratingHighlights, setIsGeneratingHighlights] = useState(false);
+  const [highlightGenerationError, setHighlightGenerationError] = useState<string | null>(null);
+  const [highlightGenerationStartTime, setHighlightGenerationStartTime] = useState<number | null>(null);
   const [themeError, setThemeError] = useState<string | null>(null);
   const [switchingToLanguage, setSwitchingToLanguage] = useState<string | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
@@ -235,10 +227,10 @@ export default function AnalyzePage() {
   const [playbackCommand, setPlaybackCommand] = useState<PlaybackCommand | null>(null);
   const [transcriptHeight, setTranscriptHeight] = useState<string>("auto");
   const [citationHighlight, setCitationHighlight] = useState<Citation | null>(null);
-  const [generationStartTime, setGenerationStartTime] = useState<number | null>(null);
-  const [processingStartTime, setProcessingStartTime] = useState<number | null>(null);
   const rightColumnTabsRef = useRef<RightColumnTabsHandle>(null);
+  const youtubePlayerRef = useRef<YouTubePlayerHandle | null>(null);
   const abortManager = useRef(new AbortManager());
+  const cachedHighlightPayloadRef = useRef<CachedHighlightPayload | null>(null);
   const selectedThemeRef = useRef<string | null>(null);
   const seoPathRef = useRef<string | null>(null);
   const nextThemeRequestIdRef = useRef(0);
@@ -321,8 +313,7 @@ export default function AnalyzePage() {
   }, [isShareReady, routeVideoId, videoId, videoInfo?.title, slugParam]);
 
   // Use custom hook for timer logic
-  const elapsedTime = useElapsedTimer(generationStartTime);
-  const processingElapsedTime = useElapsedTimer(processingStartTime);
+  const highlightGenerationElapsedTime = useElapsedTimer(highlightGenerationStartTime);
 
   // Auth and generation limit state
   const { user } = useAuth();
@@ -410,15 +401,14 @@ export default function AnalyzePage() {
     translationCache: translationCache,
   });
 
-  const [rateLimitInfo, setRateLimitInfo] = useState<{
-    remaining: number | null;
-    resetAt: Date | null;
-  }>({ remaining: -1, resetAt: null });
-  const [authLimitReached, setAuthLimitReached] = useState(false);
   const hasRedirectedForLimit = useRef(false);
 
   // Centralized playback request functions
   const requestSeek = useCallback((time: number) => {
+    if (youtubePlayerRef.current?.seekTo(time)) {
+      return;
+    }
+
     setPlaybackCommand({ type: 'SEEK', time });
   }, []);
 
@@ -555,27 +545,9 @@ export default function AnalyzePage() {
       const response = await fetch('/api/check-limit');
       const data: LimitCheckResponse = await response.json();
 
-      setAuthLimitReached(Boolean(data?.isAuthenticated && data?.canGenerate === false && data?.reason === 'LIMIT_REACHED'));
-
-      const usage = data?.usage;
-      const remainingValue =
-        typeof usage?.totalRemaining === 'number'
-          ? usage.totalRemaining
-          : usage?.totalRemaining === null
-            ? null
-            : -1;
-
-      const resetTimestamp = data?.resetAt ?? null;
-
-      setRateLimitInfo({
-        remaining: remainingValue,
-        resetAt: resetTimestamp ? new Date(resetTimestamp) : null,
-      });
-
       return data;
     } catch (error) {
       console.error('Error checking rate limit:', error);
-      setAuthLimitReached(false);
       return null;
     }
   }, []);
@@ -624,58 +596,11 @@ export default function AnalyzePage() {
     );
   }, [authErrorParam, router, routeVideoId, searchParams]);
 
-  // Automatically kick off analysis when arriving via dedicated route
-  // Check if user can generate based on server-side rate limits
-  const checkGenerationLimit = useCallback((
-    pendingVideoId?: string,
-    remainingOverride?: number | null,
-    latestLimitData?: LimitCheckResponse | null
-  ): boolean => {
-    if (user) {
-      const limitReached =
-        latestLimitData?.isAuthenticated
-          ? latestLimitData.canGenerate === false
-          : authLimitReached;
-
-      if (limitReached) {
-        const limitMessage = buildLimitExceededMessage(latestLimitData);
-        setIsRateLimitError(true);
-        setError(limitMessage);
-        toast.error(limitMessage);
-        return false;
-      }
-      return true;
-    }
-
-    let effectiveRemaining =
-      typeof remainingOverride === 'number' || remainingOverride === null
-        ? remainingOverride
-        : rateLimitInfo.remaining;
-
-    if (!latestLimitData?.isAuthenticated) {
-      const totalRemaining = latestLimitData?.usage?.totalRemaining;
-      if (typeof totalRemaining === 'number' || totalRemaining === null) {
-        effectiveRemaining = totalRemaining;
-      }
-    }
-
-    if (
-      typeof effectiveRemaining === 'number' &&
-      effectiveRemaining !== -1 &&
-      effectiveRemaining <= 0
-    ) {
-      redirectToAuthForLimit(undefined, pendingVideoId);
-      return false;
-    }
-    return true;
-  }, [user, authLimitReached, rateLimitInfo.remaining, redirectToAuthForLimit]);
-
   const processVideo = useCallback(async (
     url: string,
     selectedMode: TopicGenerationMode,
     preferredLanguage?: string
   ) => {
-    const currentRemaining = rateLimitInfo.remaining;
     try {
       const extractedVideoId = extractVideoId(url);
       if (!extractedVideoId) {
@@ -693,6 +618,7 @@ export default function AnalyzePage() {
       setIsRateLimitError(false);
       setTopics([]);
       setBaseTopics([]);
+      cachedHighlightPayloadRef.current = null;
       setTranscript([]);
       setThemes([]);
       setSelectedTheme(null);
@@ -701,6 +627,8 @@ export default function AnalyzePage() {
       setUsedTopicKeys(new Set());
       setThemeError(null);
       setIsLoadingThemeTopics(false);
+      setIsGeneratingHighlights(false);
+      setHighlightGenerationError(null);
       setSelectedTopic(null);
       setCurrentTime(0);
       setVideoDuration(0);
@@ -757,13 +685,18 @@ export default function AnalyzePage() {
               // Otherwise, set it now
               setPageState('LOADING_CACHED');
 
-              const hydratedTopics = hydrateTopicsWithTranscript(
-                Array.isArray(cacheData.topics) ? cacheData.topics : [],
-                sanitizedTranscript,
-              );
-
               // Load all cached data
               setTranscript(sanitizedTranscript);
+              cachedHighlightPayloadRef.current =
+                Array.isArray(cacheData.topics) && cacheData.topics.length > 0
+                  ? {
+                    videoId: extractedVideoId,
+                    videoDbId: cacheData.videoDbId ?? null,
+                    topics: cacheData.topics,
+                    themes: Array.isArray(cacheData.themes) ? cacheData.themes : undefined,
+                    topicCandidates: Array.isArray(cacheData.topicCandidates) ? cacheData.topicCandidates : undefined,
+                  }
+                  : null;
 
               const cachedVideoInfo = cacheData.videoInfo ?? null;
               if (cachedVideoInfo) {
@@ -782,18 +715,6 @@ export default function AnalyzePage() {
                 setVideoInfo(null);
               }
 
-              setTopics(hydratedTopics);
-              setBaseTopics(hydratedTopics);
-              const initialKeys = new Set<string>();
-              hydratedTopics.forEach(topic => {
-                if (topic.quote?.timestamp && topic.quote.text) {
-                  const key = `${topic.quote.timestamp}|${normalizeWhitespace(topic.quote.text)}`;
-                  initialKeys.add(key);
-                }
-              });
-              setUsedTopicKeys(initialKeys);
-              setSelectedTopic(hydratedTopics.length > 0 ? hydratedTopics[0] : null);
-
               // Set cached takeaways and questions
               if (cacheData.summary) {
                 setTakeawaysContent(cacheData.summary);
@@ -810,48 +731,8 @@ export default function AnalyzePage() {
               // Set page state back to idle
               setPageState('IDLE');
               setLoadingStage(null);
-              setProcessingStartTime(null);
               setSwitchingToLanguage(null);
               setIsShareReady(true);
-
-              backgroundOperation(
-                'load-cached-themes',
-                async () => {
-                  const response = await fetch("/api/video-analysis", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      videoId: extractedVideoId,
-                      videoInfo: cacheData.videoInfo,
-                      transcript: sanitizedTranscript,
-                      includeCandidatePool: true,
-                      mode: selectedMode,
-                      forceRegenerate: false
-                    }),
-                  });
-
-                  if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
-                    const message = buildApiErrorMessage(errorData, "Failed to generate themes");
-                    throw new Error(message);
-                  }
-
-                  const data = await response.json();
-                  if (Array.isArray(data.themes)) {
-                    setThemes(data.themes);
-                  }
-                  if (Array.isArray(data.topicCandidates)) {
-                    setThemeCandidateMap(prev => ({
-                      ...prev,
-                      __default: data.topicCandidates
-                    }));
-                  }
-                  return data.themes;
-                },
-                (error) => {
-                  console.error("Failed to generate themes for cached video:", error);
-                }
-              );
 
               // Fetch available transcript languages for cached videos
               // This enables the language selector dropdown to show all available native languages
@@ -904,30 +785,31 @@ export default function AnalyzePage() {
                       }),
                     });
 
-                    if (summaryRes.ok) {
-                      const { summaryContent: generatedTakeaways } = await summaryRes.json();
-                      setTakeawaysContent(generatedTakeaways);
-
-                      // Update the video analysis with the takeaways (requires auth + ownership)
-                      await backgroundOperation(
-                        'update-cached-takeaways',
-                        async () => {
-                          const res = await csrfFetch.post("/api/update-video-analysis", {
-                            videoId: extractedVideoId,
-                            summary: generatedTakeaways
-                          });
-                          // 401/403 is expected for anonymous users or non-owners
-                          if (!res.ok && res.status !== 401 && res.status !== 403) {
-                            throw new Error('Failed to update takeaways');
-                          }
-                        }
-                      );
-                      return generatedTakeaways;
-                    } else {
+                    if (!summaryRes.ok) {
                       const errorData = await summaryRes.json().catch(() => ({ error: "Unknown error" }));
                       const message = buildApiErrorMessage(errorData, "Failed to generate takeaways");
-                      throw new Error(message);
+                      setTakeawaysError(message);
+                      return null;
                     }
+
+                    const { summaryContent: generatedTakeaways } = await summaryRes.json();
+                    setTakeawaysContent(generatedTakeaways);
+
+                    // Update the video analysis with the takeaways (requires auth + ownership)
+                    await backgroundOperation(
+                      'update-cached-takeaways',
+                      async () => {
+                        const res = await csrfFetch.post("/api/update-video-analysis", {
+                          videoId: extractedVideoId,
+                          summary: generatedTakeaways
+                        });
+                        // 401/403 is expected for anonymous users or non-owners
+                        if (!res.ok && res.status !== 401 && res.status !== 403) {
+                          throw new Error('Failed to update takeaways');
+                        }
+                      }
+                    );
+                    return generatedTakeaways;
                   },
                   (error) => {
                     setTakeawaysError(error.message || "Failed to generate takeaways. Please try again.");
@@ -943,20 +825,6 @@ export default function AnalyzePage() {
             }
           }
         }
-      }
-
-      let effectiveRemaining = currentRemaining;
-      const latestLimitData = await checkRateLimit();
-
-      if (!user && latestLimitData) {
-        const totalRemaining = latestLimitData.usage?.totalRemaining;
-        if (typeof totalRemaining === 'number' || totalRemaining === null) {
-          effectiveRemaining = totalRemaining;
-        }
-      }
-
-      if (!checkGenerationLimit(extractedVideoId, effectiveRemaining, latestLimitData)) {
-        return;
       }
 
       setPageState('ANALYZING_NEW');
@@ -1121,297 +989,69 @@ export default function AnalyzePage() {
           console.error('Error generating quick preview:', error);
         });
 
-      // Initiate parallel API requests for topics and takeaways
-      setLoadingStage('generating');
-      setGenerationStartTime(Date.now());
-
-      // Create abort controllers for both requests
-      const topicsController = abortManager.current.createController('topics');
+      // Generate takeaways in the background. Highlight reels are intentionally
+      // deferred until the user clicks the generate button.
       const takeawaysController = abortManager.current.createController('takeaways', 60000);
-
-      // Start topics generation using cached video-analysis endpoint
-      const topicsPromise = fetch("/api/video-analysis", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          videoId: extractedVideoId,
-          videoInfo: fetchedVideoInfo,
-          transcript: normalizedTranscriptData,
-          mode: selectedMode,
-          forceRegenerate
-        }),
-        signal: topicsController.signal,
-      }).catch(err => {
-        if (err.name === 'AbortError') {
-          throw new Error("Topic generation was canceled or interrupted. Please try again.");
-        }
-        throw new Error("Network error: Unable to generate topics. Please check your connection.");
-      });
-
-      // Start takeaways generation in parallel (will be ignored if cached)
-      const takeawaysPromise = fetch("/api/generate-summary", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          transcript: normalizedTranscriptData,
-          videoInfo: fetchedVideoInfo,
-          videoId: extractedVideoId,
-          targetLanguage: fetchedVideoInfo?.language
-        }),
-        signal: takeawaysController.signal,
-      });
 
       // Show takeaways tab and loading state immediately (optimistic UI)
       setShowChatTab(true);
       setIsGeneratingTakeaways(true);
-
-      const toSettled = <T,>(promise: Promise<T>) =>
-        promise.then(
-          (value) => ({ status: 'fulfilled', value } as const),
-          (reason) => ({ status: 'rejected', reason } as const)
-        );
-
-      const topicsSettledPromise = toSettled(topicsPromise);
-      const takeawaysSettledPromise = toSettled(takeawaysPromise);
-
-      const topicsResult = await topicsSettledPromise;
-      if (topicsResult.status === 'rejected') {
-        takeawaysController.abort();
-        await takeawaysSettledPromise;
-        throw topicsResult.reason;
-      }
-
-      const topicsRes = topicsResult.value;
-      if (!topicsRes.ok) {
-        const errorData = await topicsRes.json().catch(() => ({ error: "Unknown error" }));
-        const requiresAuth = Boolean((errorData as any)?.requiresAuth);
-        const authMessage =
-          typeof (errorData as any)?.message === "string"
-            ? (errorData as any).message
-            : undefined;
-
-        if (requiresAuth || topicsRes.status === 401 || topicsRes.status === 403) {
-          takeawaysController.abort();
-          await takeawaysSettledPromise;
-          redirectToAuthForLimit(
-            authMessage,
-            extractedVideoId
-          );
-          return;
-        }
-
-        if (topicsRes.status === 429) {
-          setIsRateLimitError(true);
-          checkRateLimit();
-          takeawaysController.abort();
-          await takeawaysSettledPromise;
-
-          const limitMessageRaw =
-            typeof (errorData as any)?.message === "string"
-              ? (errorData as any).message.trim()
-              : "";
-
-          const limitErrorRaw =
-            typeof (errorData as any)?.error === "string"
-              ? (errorData as any).error.trim()
-              : "";
-
-          const limitMessage =
-            limitMessageRaw.length > 0
-              ? limitMessageRaw
-              : limitErrorRaw.length > 0
-                ? limitErrorRaw
-                : AUTH_LIMIT_MESSAGE;
-
-          throw new Error(limitMessage);
-        }
-
-        takeawaysController.abort();
-        await takeawaysSettledPromise;
-        const message = buildApiErrorMessage(errorData, "Failed to generate topics");
-        throw new Error(message);
-      }
-
-      const topicsData = await topicsRes.json();
-      const rawTopics = Array.isArray(topicsData.topics) ? topicsData.topics : [];
-      const generatedTopics: Topic[] = hydrateTopicsWithTranscript(rawTopics, normalizedTranscriptData);
-      const generatedThemes: string[] = Array.isArray(topicsData.themes) ? topicsData.themes : [];
-      const rawCandidates: TopicCandidate[] = Array.isArray(topicsData.topicCandidates) ? topicsData.topicCandidates : [];
-      const generatedCandidates: TopicCandidate[] = rawCandidates.map(candidate => ({
-        ...candidate,
-        key: `${candidate.quote.timestamp}|${normalizeWhitespace(candidate.quote.text)}`
-      }));
-
-      // Capture database UUID for notes saving
-      if (topicsData.videoDbId) {
-        setVideoDbId(topicsData.videoDbId);
-      }
-
-      const takeawaysResult = await takeawaysSettledPromise;
-
-      // Move to processing stage
-      setLoadingStage('processing');
-      setGenerationStartTime(null);
-      setProcessingStartTime(Date.now());
-
-      // Process takeaways result from parallel execution
-      let generatedTakeaways = null;
-      let takeawaysGenerationError = null;
-      if (takeawaysResult.status === 'fulfilled') {
-        const summaryRes = takeawaysResult.value;
-
-        if (summaryRes.ok) {
-          const summaryData = await summaryRes.json();
-          generatedTakeaways = summaryData.summaryContent;
-        } else {
-          const errorData = await summaryRes.json().catch(() => ({ error: "Unknown error" }));
-          takeawaysGenerationError = buildApiErrorMessage(errorData, "Failed to generate takeaways. Please try again.");
-        }
-      } else {
-        const error = takeawaysResult.reason;
-        if (error && error.name === 'AbortError') {
-          takeawaysGenerationError = "Takeaways generation timed out. The video might be too long.";
-        } else {
-          takeawaysGenerationError = error?.message || "Failed to generate takeaways. Please try again.";
-        }
-      }
-
-      // Synchronous batch state update - all at once
-      setTopics(generatedTopics);
-      setBaseTopics(generatedTopics);
-      const initialKeys = new Set<string>();
-      generatedTopics.forEach(topic => {
-        if (topic.quote?.timestamp && topic.quote.text) {
-          initialKeys.add(`${topic.quote.timestamp}|${normalizeWhitespace(topic.quote.text)}`);
-        }
-      });
-      setUsedTopicKeys(initialKeys);
-      setThemeCandidateMap(prev => ({
-        ...prev,
-        __default: generatedCandidates
-      }));
-      setSelectedTopic(generatedTopics.length > 0 ? generatedTopics[0] : null);
-      setThemes(generatedThemes);
-      if (generatedTakeaways) {
-        setTakeawaysContent(generatedTakeaways);
-        setShowChatTab(true);
-        setIsGeneratingTakeaways(false);
-      } else if (takeawaysGenerationError) {
-        setTakeawaysError(takeawaysGenerationError);
-        setShowChatTab(true);
-        setIsGeneratingTakeaways(false);
-      }
-
-      // Rate limit is handled server-side now
-      checkRateLimit();
-
-      // Confirm the analysis has been persisted before switching to the shareable /v/ URL
       backgroundOperation(
-        'confirm-share-ready',
+        'generate-takeaways',
         async () => {
-          if (!url) return false;
-
-          const cacheCheck = await fetch("/api/check-video-cache", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url })
-          });
-
-          if (!cacheCheck.ok) {
-            return false;
-          }
-
-          const cacheData = await cacheCheck.json();
-          if (cacheData?.cached) {
-            setIsShareReady(true);
-            return true;
-          }
-
-          return false;
-        },
-        (error) => {
-          console.error("Failed to confirm cached analysis for sharing:", error);
-        }
-      );
-
-      // NOTE: Video analysis is now saved server-side in /api/video-analysis
-      // to prevent client-side cache poisoning attacks
-
-      // Generate suggested questions
-      backgroundOperation(
-        'generate-questions',
-        async () => {
-          const res = await fetch("/api/suggested-questions", {
+          const summaryRes = await fetch("/api/generate-summary", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               transcript: normalizedTranscriptData,
-              topics: generatedTopics,
-              videoTitle: fetchedVideoInfo?.title,
-              language: fetchedVideoInfo?.language
+              videoInfo: fetchedVideoInfo,
+              videoId: extractedVideoId,
+              targetLanguage: fetchedVideoInfo?.language
             }),
+            signal: takeawaysController.signal,
           });
 
-          const applyCachedQuestions = (questions: string[]) => {
-            if (questions.length === 0) {
-              return questions;
-            }
-            setCachedSuggestedQuestions(prev => {
-              if (prev && prev.length > 0) {
-                return prev;
-              }
-              return questions;
-            });
-            return questions;
-          };
-
-          if (!res.ok) {
-            console.error("Failed to generate suggested questions:", res.status, res.statusText);
-            return applyCachedQuestions(buildSuggestedQuestionFallbacks(3));
+          if (!summaryRes.ok) {
+            const errorData = await summaryRes.json().catch(() => ({ error: "Unknown error" }));
+            setTakeawaysError(buildApiErrorMessage(errorData, "Failed to generate takeaways. Please try again."));
+            return null;
           }
 
-          let parsed: unknown;
-          try {
-            parsed = await res.json();
-          } catch (error) {
-            console.error("Failed to parse suggested questions payload:", error);
-            return applyCachedQuestions(buildSuggestedQuestionFallbacks(3));
-          }
+          const summaryData = await summaryRes.json();
+          const generatedTakeaways = summaryData.summaryContent;
+          setTakeawaysContent(generatedTakeaways);
 
-          const questions = Array.isArray((parsed as any)?.questions)
-            ? (parsed as any).questions
-              .filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)
-              .map((item: string) => item.trim())
-            : [];
-
-          const normalizedQuestions = questions.length > 0
-            ? questions.slice(0, 3)
-            : buildSuggestedQuestionFallbacks(3);
-
-          applyCachedQuestions(normalizedQuestions);
-
-          // Update video analysis with suggested questions (requires auth + ownership)
           await backgroundOperation(
-            'update-questions',
+            'update-takeaways',
             async () => {
               const updateRes = await csrfFetch.post("/api/update-video-analysis", {
                 videoId: extractedVideoId,
-                suggestedQuestions: normalizedQuestions
+                summary: generatedTakeaways
               });
 
-              // 401/403 is expected for anonymous users or non-owners
               if (!updateRes.ok && updateRes.status !== 404 && updateRes.status !== 401 && updateRes.status !== 403) {
-                throw new Error('Failed to update suggested questions');
+                throw new Error('Failed to update takeaways');
               }
             }
           );
 
-          return normalizedQuestions;
+          return generatedTakeaways;
         },
         (error) => {
-          console.error("Failed to generate suggested questions:", error);
+          const isAbortError =
+            typeof error === "object" &&
+            error !== null &&
+            "name" in error &&
+            (error as { name?: string }).name === "AbortError";
+
+          if (!isAbortError) {
+            setTakeawaysError(error.message || "Failed to generate takeaways. Please try again.");
+          }
         }
-      );
+      ).finally(() => {
+        abortManager.current.cleanup('takeaways');
+        setIsGeneratingTakeaways(false);
+      });
 
     } catch (err) {
       setError(
@@ -1423,19 +1063,11 @@ export default function AnalyzePage() {
     } finally {
       setPageState('IDLE');
       setLoadingStage(null);
-      setGenerationStartTime(null);
-      setProcessingStartTime(null);
-      setIsGeneratingTakeaways(false);
       setSwitchingToLanguage(null);
     }
   }, [
-    rateLimitInfo.remaining,
     storeCurrentVideoForAuth,
     videoId,
-    checkRateLimit,
-    user,
-    checkGenerationLimit,
-    redirectToAuthForLimit,
     forceRegenerate
   ]);
 
@@ -1534,6 +1166,260 @@ export default function AnalyzePage() {
       requestPlayAll();
     }
   }, [isPlayingAll, requestPlayAll]);
+
+  const applyHighlightResponse = useCallback((
+    topicsData: any,
+    sourceTranscript: TranscriptSegment[]
+  ): Topic[] => {
+    const rawTopics = Array.isArray(topicsData.topics) ? topicsData.topics : [];
+    const generatedTopics: Topic[] = hydrateTopicsWithTranscript(rawTopics, sourceTranscript);
+    const generatedThemes: string[] = Array.isArray(topicsData.themes) ? topicsData.themes : [];
+    const rawCandidates: TopicCandidate[] = Array.isArray(topicsData.topicCandidates) ? topicsData.topicCandidates : [];
+    const generatedCandidates: TopicCandidate[] = rawCandidates.map(candidate => ({
+      ...candidate,
+      key: `${candidate.quote.timestamp}|${normalizeWhitespace(candidate.quote.text)}`
+    }));
+
+    if (topicsData.videoDbId) {
+      setVideoDbId(topicsData.videoDbId);
+    }
+
+    setTopics(generatedTopics);
+    setBaseTopics(generatedTopics);
+
+    const initialKeys = new Set<string>();
+    generatedTopics.forEach(topic => {
+      if (topic.quote?.timestamp && topic.quote.text) {
+        initialKeys.add(`${topic.quote.timestamp}|${normalizeWhitespace(topic.quote.text)}`);
+      }
+    });
+    setUsedTopicKeys(initialKeys);
+    setThemeCandidateMap(prev => ({
+      ...prev,
+      __default: generatedCandidates
+    }));
+    setSelectedTopic(null);
+    setThemes(generatedThemes);
+
+    return generatedTopics;
+  }, []);
+
+  const generateSuggestedQuestionsForTopics = useCallback((
+    generatedTopics: Topic[],
+    sourceTranscript: TranscriptSegment[],
+    sourceVideoInfo: VideoInfo | null
+  ) => {
+    if (!videoId) return;
+
+    backgroundOperation(
+      'generate-questions',
+      async () => {
+        const res = await fetch("/api/suggested-questions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            transcript: sourceTranscript,
+            topics: generatedTopics,
+            videoTitle: sourceVideoInfo?.title,
+            language: sourceVideoInfo?.language
+          }),
+        });
+
+        const applyCachedQuestions = (questions: string[]) => {
+          if (questions.length === 0) {
+            return questions;
+          }
+          setCachedSuggestedQuestions(prev => {
+            if (prev && prev.length > 0) {
+              return prev;
+            }
+            return questions;
+          });
+          return questions;
+        };
+
+        if (!res.ok) {
+          console.error("Failed to generate suggested questions:", res.status, res.statusText);
+          return applyCachedQuestions(buildSuggestedQuestionFallbacks(3));
+        }
+
+        let parsed: unknown;
+        try {
+          parsed = await res.json();
+        } catch (error) {
+          console.error("Failed to parse suggested questions payload:", error);
+          return applyCachedQuestions(buildSuggestedQuestionFallbacks(3));
+        }
+
+        const questions = Array.isArray((parsed as any)?.questions)
+          ? (parsed as any).questions
+            .filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)
+            .map((item: string) => item.trim())
+          : [];
+
+        const normalizedQuestions = questions.length > 0
+          ? questions.slice(0, 3)
+          : buildSuggestedQuestionFallbacks(3);
+
+        applyCachedQuestions(normalizedQuestions);
+
+        await backgroundOperation(
+          'update-questions',
+          async () => {
+            const updateRes = await csrfFetch.post("/api/update-video-analysis", {
+              videoId,
+              suggestedQuestions: normalizedQuestions
+            });
+
+            if (!updateRes.ok && updateRes.status !== 404 && updateRes.status !== 401 && updateRes.status !== 403) {
+              throw new Error('Failed to update suggested questions');
+            }
+          }
+        );
+
+        return normalizedQuestions;
+      },
+      (error) => {
+        console.error("Failed to generate suggested questions:", error);
+      }
+    );
+  }, [videoId]);
+
+  const confirmShareReady = useCallback((url: string) => {
+    backgroundOperation(
+      'confirm-share-ready',
+      async () => {
+        if (!url) return false;
+
+        const cacheCheck = await fetch("/api/check-video-cache", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url })
+        });
+
+        if (!cacheCheck.ok) {
+          return false;
+        }
+
+        const cacheData = await cacheCheck.json();
+        if (cacheData?.cached) {
+          setIsShareReady(true);
+          return true;
+        }
+
+        return false;
+      },
+      (error) => {
+        console.error("Failed to confirm cached analysis for sharing:", error);
+      }
+    );
+  }, []);
+
+  const handleGenerateHighlights = useCallback(async () => {
+    if (!videoId || transcript.length === 0 || isGeneratingHighlights) {
+      return;
+    }
+
+    const cachedHighlightPayload = cachedHighlightPayloadRef.current;
+    if (
+      !forceRegenerate &&
+      cachedHighlightPayload?.videoId === videoId &&
+      Array.isArray(cachedHighlightPayload.topics) &&
+      cachedHighlightPayload.topics.length > 0
+    ) {
+      setHighlightGenerationError(null);
+      setIsRateLimitError(false);
+      const generatedTopics = applyHighlightResponse(cachedHighlightPayload, transcript);
+      cachedHighlightPayloadRef.current = null;
+      if (!cachedSuggestedQuestions?.length) {
+        generateSuggestedQuestionsForTopics(generatedTopics, transcript, videoInfo);
+      }
+      return;
+    }
+
+    const requestKey = 'highlights';
+    const controller = abortManager.current.createController(requestKey);
+    setHighlightGenerationError(null);
+    setHighlightGenerationStartTime(Date.now());
+    setIsGeneratingHighlights(true);
+    setIsRateLimitError(false);
+
+    try {
+      const response = await fetch("/api/video-analysis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          videoId,
+          videoInfo,
+          transcript,
+          includeCandidatePool: true,
+          mode,
+          forceRegenerate
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
+        const requiresAuth = Boolean((errorData as any)?.requiresAuth);
+        const authMessage =
+          typeof (errorData as any)?.message === "string"
+            ? (errorData as any).message
+            : undefined;
+
+        if (requiresAuth || response.status === 401 || response.status === 403) {
+          redirectToAuthForLimit(authMessage, videoId);
+          return;
+        }
+
+        if (response.status === 429) {
+          setIsRateLimitError(true);
+          checkRateLimit();
+        }
+
+        throw new Error(buildApiErrorMessage(errorData, "Failed to generate highlight reels"));
+      }
+
+      const topicsData = await response.json();
+      const generatedTopics = applyHighlightResponse(topicsData, transcript);
+      checkRateLimit();
+      confirmShareReady(normalizedUrl);
+      generateSuggestedQuestionsForTopics(generatedTopics, transcript, videoInfo);
+    } catch (error) {
+      const isAbortError =
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        (error as { name?: string }).name === "AbortError";
+
+      if (!isAbortError) {
+        setHighlightGenerationError(
+          normalizeErrorMessage(
+            error instanceof Error ? error.message : undefined,
+            "Failed to generate highlight reels. Please try again."
+          )
+        );
+      }
+    } finally {
+      abortManager.current.cleanup(requestKey);
+      setHighlightGenerationStartTime(null);
+      setIsGeneratingHighlights(false);
+    }
+  }, [
+    videoId,
+    transcript,
+    isGeneratingHighlights,
+    videoInfo,
+    mode,
+    forceRegenerate,
+    cachedSuggestedQuestions,
+    redirectToAuthForLimit,
+    checkRateLimit,
+    applyHighlightResponse,
+    confirmShareReady,
+    normalizedUrl,
+    generateSuggestedQuestionsForTopics
+  ]);
 
   useEffect(() => {
     selectedThemeRef.current = selectedTheme;
@@ -1733,14 +1619,22 @@ export default function AnalyzePage() {
 
   // Dynamically adjust right column height to match video container
   useEffect(() => {
-    const adjustRightColumnHeight = () => {
-      const videoContainer = document.getElementById("video-container");
-      const rightColumnContainer = document.getElementById("right-column-container");
+    let animationFrameId: number | null = null;
 
-      if (videoContainer && rightColumnContainer) {
-        const videoHeight = videoContainer.offsetHeight;
-        setTranscriptHeight(`${videoHeight}px`);
+    const adjustRightColumnHeight = () => {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
       }
+
+      animationFrameId = requestAnimationFrame(() => {
+        const videoContainer = document.getElementById("video-container");
+        const rightColumnContainer = document.getElementById("right-column-container");
+
+        if (videoContainer && rightColumnContainer) {
+          const videoHeight = videoContainer.offsetHeight;
+          setTranscriptHeight(`${Math.max(videoHeight, 420)}px`);
+        }
+      });
     };
 
     // Initial adjustment
@@ -1757,10 +1651,13 @@ export default function AnalyzePage() {
     }
 
     return () => {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+      }
       window.removeEventListener("resize", adjustRightColumnHeight);
       resizeObserver.disconnect();
     };
-  }, [videoId, topics]); // Re-run when video or topics change
+  }, [videoId, transcript.length, pageState]); // Re-run when the workspace first mounts or changes videos
 
   const [notes, setNotes] = useState<Note[]>([]);
   const [, setIsLoadingNotes] = useState(false);
@@ -1945,14 +1842,12 @@ export default function AnalyzePage() {
             <p className="text-sm font-medium text-slate-700">
               {switchingToLanguage
                 ? `Switching to ${getLanguageName(switchingToLanguage)}...`
-                : 'Analyzing video and generating highlight reels'}
+                : 'Loading video workspace'}
             </p>
             {!switchingToLanguage && (
               <p className="mt-1.5 text-xs text-slate-500">
                 {loadingStage === 'fetching' && 'Fetching transcript...'}
                 {loadingStage === 'understanding' && 'Fetching transcript...'}
-                {loadingStage === 'generating' && `Creating highlight reels... (${elapsedTime} seconds)`}
-                {loadingStage === 'processing' && `Processing and matching quotes... (${processingElapsedTime} seconds)`}
               </p>
             )}
           </div>
@@ -2013,7 +1908,7 @@ export default function AnalyzePage() {
         </section>
       )}
 
-      {videoId && topics.length > 0 && pageState === 'IDLE' && (
+      {videoId && transcript.length > 0 && pageState === 'IDLE' && (
         <div className="mx-auto w-full max-w-[1800px] px-5 pb-5 pt-0">
           {error && (
             <div className="mb-6 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs font-medium text-red-600 shadow-sm">
@@ -2025,6 +1920,8 @@ export default function AnalyzePage() {
             <div className="lg:col-span-2">
               <div className="sticky top-[6.5rem] space-y-3.5" id="video-container">
                 <YouTubePlayer
+                  key={videoId}
+                  ref={youtubePlayerRef}
                   videoId={videoId}
                   selectedTopic={selectedTopic}
                   playbackCommand={playbackCommand}
@@ -2072,6 +1969,10 @@ export default function AnalyzePage() {
                   videoId={videoId ?? undefined}
                   selectedLanguage={selectedLanguage}
                   onRequestTranslation={translateWithContext}
+                  onGenerateHighlights={handleGenerateHighlights}
+                  isGeneratingHighlights={isGeneratingHighlights}
+                  highlightGenerationElapsedTime={highlightGenerationElapsedTime}
+                  highlightGenerationError={highlightGenerationError}
                 />
               </div>
             </div>
@@ -2081,7 +1982,7 @@ export default function AnalyzePage() {
               <div
                 className="sticky top-[6.5rem]"
                 id="right-column-container"
-                style={{ height: transcriptHeight, maxHeight: transcriptHeight }}
+                style={{ height: transcriptHeight, maxHeight: transcriptHeight, minHeight: 420 }}
               >
                 <RightColumnTabs
                   ref={rightColumnTabsRef}
