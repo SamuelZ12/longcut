@@ -12,7 +12,8 @@ import { Play, Pause, Loader2, Sparkles } from "lucide-react";
 const DEFAULT_LABELS = {
   playAll: "Play All",
   stop: "Stop",
-  generatingYourReels: "Generating your reels...",
+  generatingYourReels: "Creating highlight reels...",
+  analyzingAndGenerating: "Analyzing video and generating highlight reels",
   generateHighlightReels: "Generate highlight reels",
   generateDescription: "AI will scan the full transcript and create highlight reels - the most insightful moments organized by topic.",
   tryAgain: "Try again",
@@ -36,6 +37,7 @@ interface HighlightsPanelProps {
   onRequestTranslation?: TranslationRequestHandler;
   onGenerateHighlights?: () => void;
   isGeneratingHighlights?: boolean;
+  highlightGenerationElapsedTime?: number;
   highlightGenerationError?: string | null;
 }
 
@@ -56,6 +58,7 @@ export function HighlightsPanel({
   onRequestTranslation,
   onGenerateHighlights,
   isGeneratingHighlights = false,
+  highlightGenerationElapsedTime = 0,
   highlightGenerationError = null,
 }: HighlightsPanelProps) {
   // Translation state
@@ -75,6 +78,7 @@ export function HighlightsPanel({
         onRequestTranslation(DEFAULT_LABELS.playAll, `ui_highlights:playAll:${selectedLanguage}`),
         onRequestTranslation(DEFAULT_LABELS.stop, `ui_highlights:stop:${selectedLanguage}`),
         onRequestTranslation(DEFAULT_LABELS.generatingYourReels, `ui_highlights:generatingYourReels:${selectedLanguage}`),
+        onRequestTranslation(DEFAULT_LABELS.analyzingAndGenerating, `ui_highlights:analyzingAndGenerating:${selectedLanguage}`),
         onRequestTranslation(DEFAULT_LABELS.generateHighlightReels, `ui_highlights:generateHighlightReels:${selectedLanguage}`),
         onRequestTranslation(DEFAULT_LABELS.generateDescription, `ui_highlights:generateDescription:${selectedLanguage}`),
         onRequestTranslation(DEFAULT_LABELS.tryAgain, `ui_highlights:tryAgain:${selectedLanguage}`),
@@ -85,9 +89,10 @@ export function HighlightsPanel({
           playAll: translations[0],
           stop: translations[1],
           generatingYourReels: translations[2],
-          generateHighlightReels: translations[3],
-          generateDescription: translations[4],
-          tryAgain: translations[5],
+          analyzingAndGenerating: translations[3],
+          generateHighlightReels: translations[4],
+          generateDescription: translations[5],
+          tryAgain: translations[6],
         });
       }
     };
@@ -107,6 +112,10 @@ export function HighlightsPanel({
   const hasTopics = topics.length > 0;
   const showGenerateState = !hasTopics && onGenerateHighlights;
   const isGenerating = isGeneratingHighlights || isLoadingThemeTopics;
+  const highlightGenerationLabel =
+    isGeneratingHighlights
+      ? `${translatedLabels.generatingYourReels} (${highlightGenerationElapsedTime} seconds)`
+      : translatedLabels.generatingYourReels;
 
   return (
     <Card className="overflow-hidden p-0 border-0 relative">
@@ -114,17 +123,21 @@ export function HighlightsPanel({
         "p-2.5 bg-background rounded-b-3xl flex-shrink-0 transition-all duration-200",
         isLoadingThemeTopics && hasTopics && "blur-[4px] opacity-50 pointer-events-none"
       )}>
-        {showGenerateState ? (
+        {showGenerateState && isGeneratingHighlights ? (
+          <div className="flex min-h-40 flex-col items-center justify-center px-5 py-7 text-center">
+            <Loader2 className="mb-3 h-5 w-5 animate-spin text-slate-900" />
+            <h3 className="text-sm font-semibold leading-tight text-slate-700">
+              {translatedLabels.analyzingAndGenerating}
+            </h3>
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+              {highlightGenerationLabel}
+            </p>
+          </div>
+        ) : showGenerateState ? (
           <div className="flex min-h-40 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-5 py-7 text-center">
-            {isGeneratingHighlights ? (
-              <Loader2 className="mb-3 h-5 w-5 animate-spin text-primary" />
-            ) : (
-              <Sparkles className="mb-3 h-5 w-5 text-primary" />
-            )}
+            <Sparkles className="mb-3 h-5 w-5 text-primary" />
             <h3 className="text-sm font-semibold text-slate-900">
-              {isGeneratingHighlights
-                ? translatedLabels.generatingYourReels
-                : translatedLabels.generateHighlightReels}
+              {translatedLabels.generateHighlightReels}
             </h3>
             <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-500">
               {translatedLabels.generateDescription}
@@ -141,17 +154,8 @@ export function HighlightsPanel({
               disabled={isGeneratingHighlights}
               className="mt-4 h-8 text-xs"
             >
-              {isGeneratingHighlights ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  {translatedLabels.generatingYourReels}
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-3.5 w-3.5" />
-                  {highlightGenerationError ? translatedLabels.tryAgain : translatedLabels.generateHighlightReels}
-                </>
-              )}
+              <Sparkles className="h-3.5 w-3.5" />
+              {highlightGenerationError ? translatedLabels.tryAgain : translatedLabels.generateHighlightReels}
             </Button>
           </div>
         ) : (
@@ -207,7 +211,7 @@ export function HighlightsPanel({
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 pointer-events-none">
           <Loader2 className="h-5 w-5 animate-spin text-primary" />
           <p className="text-sm font-medium text-foreground">
-            {translatedLabels.generatingYourReels}
+            {highlightGenerationLabel}
           </p>
         </div>
       )}

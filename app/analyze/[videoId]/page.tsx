@@ -24,6 +24,13 @@ import { useTranscriptExport } from "@/lib/hooks/use-transcript-export";
 // Page state for better UX
 type PageState = 'IDLE' | 'ANALYZING_NEW' | 'LOADING_CACHED';
 type AuthModalTrigger = 'generation-limit' | 'save-video' | 'manual' | 'save-note';
+type CachedHighlightPayload = {
+  videoId: string;
+  videoDbId?: string | null;
+  topics: Topic[];
+  themes?: string[];
+  topicCandidates?: TopicCandidate[];
+};
 import { buildVideoSlug, extractVideoId } from "@/lib/utils";
 import { getLanguageName } from "@/lib/language-utils";
 import { NO_CREDITS_USED_MESSAGE } from "@/lib/no-credits-message";
@@ -178,7 +185,7 @@ export default function AnalyzePage() {
       : 'IDLE'
   );
   const hasAttemptedLinking = useRef(false);
-  const [loadingStage, setLoadingStage] = useState<'fetching' | 'understanding' | 'generating' | 'processing' | null>(null);
+  const [loadingStage, setLoadingStage] = useState<'fetching' | 'understanding' | null>(null);
   const { mode, isLoading: isModeLoading } = useModePreference();
   const [error, setError] = useState("");
   const [isRateLimitError, setIsRateLimitError] = useState(false);
@@ -208,6 +215,7 @@ export default function AnalyzePage() {
   const [isLoadingThemeTopics, setIsLoadingThemeTopics] = useState(false);
   const [isGeneratingHighlights, setIsGeneratingHighlights] = useState(false);
   const [highlightGenerationError, setHighlightGenerationError] = useState<string | null>(null);
+  const [highlightGenerationStartTime, setHighlightGenerationStartTime] = useState<number | null>(null);
   const [themeError, setThemeError] = useState<string | null>(null);
   const [switchingToLanguage, setSwitchingToLanguage] = useState<string | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
@@ -219,11 +227,10 @@ export default function AnalyzePage() {
   const [playbackCommand, setPlaybackCommand] = useState<PlaybackCommand | null>(null);
   const [transcriptHeight, setTranscriptHeight] = useState<string>("auto");
   const [citationHighlight, setCitationHighlight] = useState<Citation | null>(null);
-  const [generationStartTime, setGenerationStartTime] = useState<number | null>(null);
-  const [processingStartTime, setProcessingStartTime] = useState<number | null>(null);
   const rightColumnTabsRef = useRef<RightColumnTabsHandle>(null);
   const youtubePlayerRef = useRef<YouTubePlayerHandle | null>(null);
   const abortManager = useRef(new AbortManager());
+  const cachedHighlightPayloadRef = useRef<CachedHighlightPayload | null>(null);
   const selectedThemeRef = useRef<string | null>(null);
   const seoPathRef = useRef<string | null>(null);
   const nextThemeRequestIdRef = useRef(0);
@@ -306,8 +313,7 @@ export default function AnalyzePage() {
   }, [isShareReady, routeVideoId, videoId, videoInfo?.title, slugParam]);
 
   // Use custom hook for timer logic
-  const elapsedTime = useElapsedTimer(generationStartTime);
-  const processingElapsedTime = useElapsedTimer(processingStartTime);
+  const highlightGenerationElapsedTime = useElapsedTimer(highlightGenerationStartTime);
 
   // Auth and generation limit state
   const { user } = useAuth();
@@ -612,6 +618,7 @@ export default function AnalyzePage() {
       setIsRateLimitError(false);
       setTopics([]);
       setBaseTopics([]);
+      cachedHighlightPayloadRef.current = null;
       setTranscript([]);
       setThemes([]);
       setSelectedTheme(null);
@@ -680,6 +687,16 @@ export default function AnalyzePage() {
 
               // Load all cached data
               setTranscript(sanitizedTranscript);
+              cachedHighlightPayloadRef.current =
+                Array.isArray(cacheData.topics) && cacheData.topics.length > 0
+                  ? {
+                    videoId: extractedVideoId,
+                    videoDbId: cacheData.videoDbId ?? null,
+                    topics: cacheData.topics,
+                    themes: Array.isArray(cacheData.themes) ? cacheData.themes : undefined,
+                    topicCandidates: Array.isArray(cacheData.topicCandidates) ? cacheData.topicCandidates : undefined,
+                  }
+                  : null;
 
               const cachedVideoInfo = cacheData.videoInfo ?? null;
               if (cachedVideoInfo) {
@@ -714,7 +731,6 @@ export default function AnalyzePage() {
               // Set page state back to idle
               setPageState('IDLE');
               setLoadingStage(null);
-              setProcessingStartTime(null);
               setSwitchingToLanguage(null);
               setIsShareReady(true);
 
@@ -1047,8 +1063,6 @@ export default function AnalyzePage() {
     } finally {
       setPageState('IDLE');
       setLoadingStage(null);
-      setGenerationStartTime(null);
-      setProcessingStartTime(null);
       setSwitchingToLanguage(null);
     }
   }, [
@@ -1306,9 +1320,27 @@ export default function AnalyzePage() {
       return;
     }
 
+    const cachedHighlightPayload = cachedHighlightPayloadRef.current;
+    if (
+      !forceRegenerate &&
+      cachedHighlightPayload?.videoId === videoId &&
+      Array.isArray(cachedHighlightPayload.topics) &&
+      cachedHighlightPayload.topics.length > 0
+    ) {
+      setHighlightGenerationError(null);
+      setIsRateLimitError(false);
+      const generatedTopics = applyHighlightResponse(cachedHighlightPayload, transcript);
+      cachedHighlightPayloadRef.current = null;
+      if (!cachedSuggestedQuestions?.length) {
+        generateSuggestedQuestionsForTopics(generatedTopics, transcript, videoInfo);
+      }
+      return;
+    }
+
     const requestKey = 'highlights';
     const controller = abortManager.current.createController(requestKey);
     setHighlightGenerationError(null);
+    setHighlightGenerationStartTime(Date.now());
     setIsGeneratingHighlights(true);
     setIsRateLimitError(false);
 
@@ -1370,6 +1402,7 @@ export default function AnalyzePage() {
       }
     } finally {
       abortManager.current.cleanup(requestKey);
+      setHighlightGenerationStartTime(null);
       setIsGeneratingHighlights(false);
     }
   }, [
@@ -1379,6 +1412,7 @@ export default function AnalyzePage() {
     videoInfo,
     mode,
     forceRegenerate,
+    cachedSuggestedQuestions,
     redirectToAuthForLimit,
     checkRateLimit,
     applyHighlightResponse,
@@ -1814,8 +1848,6 @@ export default function AnalyzePage() {
               <p className="mt-1.5 text-xs text-slate-500">
                 {loadingStage === 'fetching' && 'Fetching transcript...'}
                 {loadingStage === 'understanding' && 'Fetching transcript...'}
-                {loadingStage === 'generating' && `Preparing workspace... (${elapsedTime} seconds)`}
-                {loadingStage === 'processing' && `Processing video data... (${processingElapsedTime} seconds)`}
               </p>
             )}
           </div>
@@ -1939,6 +1971,7 @@ export default function AnalyzePage() {
                   onRequestTranslation={translateWithContext}
                   onGenerateHighlights={handleGenerateHighlights}
                   isGeneratingHighlights={isGeneratingHighlights}
+                  highlightGenerationElapsedTime={highlightGenerationElapsedTime}
                   highlightGenerationError={highlightGenerationError}
                 />
               </div>
