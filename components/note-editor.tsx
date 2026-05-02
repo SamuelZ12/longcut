@@ -104,7 +104,7 @@ export function NoteEditor({ selectedText, metadata, currentTime, onSave }: Note
   }, [originalQuote]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSave();
     }
