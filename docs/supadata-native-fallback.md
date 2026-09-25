@@ -43,7 +43,7 @@ Raw job IDs, billing details, and vendor response bodies are not exposed in the 
 ```
 
 Use the requested language preference, not the returned language. Missing/empty preference maps to `null`.
-Do not reuse entries from `auto`/generated requests in this namespace. This ticket publishes identity/outcomes; it does not implement shared caching or cross-request deduplication.
+Do not reuse entries from `auto`/generated requests in this namespace. The adapter publishes identity/outcomes; shared caching and cross-request deduplication belong to its callers.
 
 `noCreditsUsed` remains a compatibility flag scoped to **Longcut video allowance**, made explicit with `creditsScope: "longcut_allowance"` on transcript errors.
 The shared UI/API message states that this does not indicate whether the provider charged Longcut. Rate-limit admission requests may still be counted.

@@ -1,8 +1,6 @@
 # Paid processing during dependency failures
 
-Implemented for incident ticket `.scratch/supadata-cost-incident/issues/01-stop-paid-processing-during-database-failures.md`.
-
-## Contract for tickets 03–05
+## Dependency contract
 
 ### Cache lookup
 
@@ -43,7 +41,7 @@ Every paid route opts into `withSecurity(..., { paidWork: true })` or `SECURITY_
 
 Before entering a paid handler, middleware requires a successful cache-read readiness check, readable auth/guest/subscription usage dependencies, and a durable limiter admission. A failed read, malformed limiter reply, or failed admission write stops the handler. General free/read-only endpoint throttles remain best-effort; their own data dependencies still report errors.
 
-This is dependency gating, **not** a new credit/reservation policy. Existing endpoint-specific allowance checks remain in place. It does not reserve customer credits across requests or introduce idempotency/reconciliation. Tickets 03–05 must preserve this gate when changing those semantics.
+This is dependency gating, **not** a new credit/reservation policy. Existing endpoint-specific allowance checks remain in place. It does not reserve customer credits across requests or introduce idempotency/reconciliation. Admission and caching changes must preserve this gate.
 
 `video-analysis` stops on required save/credit-record failures. Theme generation follows successful persistence, so those failures do not launch another AI call. Cached analysis retrieval does not generate fresh themes. Failed persistence is not returned as a successful saved analysis.
 
@@ -58,8 +56,6 @@ This is dependency gating, **not** a new credit/reservation policy. Existing end
 ## Limiter persistence and RLS
 
 Migration: `supabase/migrations/20260923060000_server_only_limiter.sql`.
-
-Historical policies included `Anyone can read rate limits`, `Anyone can insert rate limits`, `Service role can delete rate limits`, and `rate_limits_no_direct_access`. Permissive policies combine with OR, so the last policy did not deny access established by earlier policies.
 
 The migration removes all existing policies on this table, revokes direct PUBLIC/anon/authenticated table access, and restricts RPC execution to `service_role`. Two RPCs are exposed to trusted server code:
 
@@ -94,22 +90,4 @@ npm run test:limiter-db
 
 The runner creates a uniquely named disposable PostgreSQL container with no published ports, then removes it in `finally`. It does not accept a database URL or load environment files. A fresh cluster isolates roles as well as tables. Bootstrap uses the local superuser, but the migration connects as a NOSUPERUSER CREATEROLE/BYPASSRLS database/table/cleanup-function owner, with `public` owned by `pg_database_owner` and the target role absent.
 
-The fixture combines historical limiter policies with the observed production 48-hour public delete policy and 24-hour cleanup behavior. A failure injected immediately before COMMIT must restore policies, table/schema/function ACLs, cleanup definition, rows and memberships, and remove newly created functions/role. Successful migration must leave narrow function ownership/search paths and no executor SET/INHERIT or target schema CREATE privilege. Existing browser denial, server persistence, read/write failure, recovery, retention, and concurrency checks still run. This is a production-like local permission rehearsal, not an exact production schema replay or a replay of all unrelated Supabase migrations.
-
-### Executed results — September 22, 2026 PDT
-
-| Command | Result |
-| --- | --- |
-| `npm test` | Passed: 60 Vitest behavioral tests + 51 existing tests |
-| `npm run test:limiter-db` | Passed: historical policies; both browser roles denied; server reads/writes; guest persistence; injected read/write failures; recovery; retention; 8 concurrent admissions allow exactly 1 |
-| `npx tsc --noEmit` | Passed |
-| `npm run lint` | Passed: 0 errors, 5 existing unused-variable warnings |
-| `git diff --check` | Passed |
-
-Standards and spec reviews ran separately. Follow-up reviews found no remaining blocking findings after fixes for persistence transport errors, translation queue handling, preview timeout, cached-content visibility, retention, and sanitized save diagnostics.
-
-### Ownership repair verification — September 24, 2026 PDT
-
-The earlier superuser-only database tests missed the ownership-transfer failure found during release preflight. The updated runner first reproduced `must be able to SET ROLE "limiter_executor"` against the original migration, then passed after the temporary-membership repair, including rollback and post-commit privilege assertions.
-
-Clean tracked-source validation used an isolated temporary workspace and `npm ci --no-audit --no-fund` (744 packages), without copying installed dependencies or local environment files. Results: 60 Vitest + 51 existing tests passed; TypeScript passed; lint reported zero errors and five existing warnings; production build passed compilation, type checking, and all 42 static pages. Build used a sanitized environment, localhost/dummy Supabase settings, no provider credentials, and real font fetching (no font mocks). This establishes a clean-install build, not production integration health. Final local database regression and script lint also passed after the fixture update. No release or production mutation was performed.
+A failure injected immediately before COMMIT must restore policies, table/schema/function ACLs, cleanup definition, rows and memberships, and remove newly created functions/role. Successful migration must leave narrow function ownership/search paths and no executor SET/INHERIT or target schema CREATE privilege. The suite also checks browser denial, server persistence, read/write failure, recovery, retention, and concurrency. Local permission tests do not establish production integration health.
