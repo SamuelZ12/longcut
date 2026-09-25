@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { withInitialAnalysis } from '@/lib/initial-analysis-spend';
 import { TranscriptSegment, VideoInfo } from '@/lib/types';
 import { withSecurity } from '@/lib/security-middleware';
 import { RATE_LIMITS } from '@/lib/rate-limiter';
@@ -341,7 +342,7 @@ async function handler(request: NextRequest) {
 }
 
 // Apply security with generation rate limits
-export const POST = withSecurity(handler, {
+export const POST = withSecurity(withInitialAnalysis('summary', handler), {
   paidWork: true,
   rateLimit: RATE_LIMITS.AUTH_GENERATION, // Use authenticated rate limit
   maxBodySize: 10 * 1024 * 1024, // 10MB for large transcripts

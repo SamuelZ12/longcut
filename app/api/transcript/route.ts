@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { withInitialAnalysis } from '@/lib/initial-analysis-spend';
 import { extractVideoId } from '@/lib/utils';
 import { withSecurity, SECURITY_PRESETS } from '@/lib/security-middleware';
 import { shouldUseMockData, getMockTranscript } from '@/lib/mock-data';
@@ -258,4 +259,4 @@ async function handler(request: NextRequest) {
   }
 }
 
-export const POST = withSecurity(handler, SECURITY_PRESETS.PAID);
+export const POST = withSecurity(withInitialAnalysis('transcript', handler), SECURITY_PRESETS.PAID);

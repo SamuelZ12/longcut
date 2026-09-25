@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { initialAnalysisErrorResponse, initialThemeDiscovery, requireInitialAnalysisContext, withInitialAnalysis } from '@/lib/initial-analysis-spend';
+import { assertInitialAIAdmission } from '@/lib/initial-ai-context';
 import { createClient } from '@/lib/supabase/server';
 import {
   videoAnalysisRequestSchema,
@@ -152,10 +154,17 @@ async function handler(req: NextRequest) {
       }
 
       try {
+        if (!isCachedAnalysis) requireInitialAnalysisContext();
+        // A cached-theme exemption applies only to the server's cached video, never arbitrary client transcript content.
+        const themeTranscript = isCachedAnalysis ? cachedVideo.transcript : transcript;
+        const themeVideoInfo = isCachedAnalysis ? {
+          title: cachedVideo.title, author: cachedVideo.author, duration: cachedVideo.duration,
+          language: cachedVideo.language,
+        } : videoInfo;
         const { topics: themedTopics } = await generateTopicsFromTranscript(
-          transcript,
+          themeTranscript,
           {
-            videoInfo,
+            videoInfo: themeVideoInfo,
             theme,
             excludeTopicKeys: new Set(validatedData.excludeTopicKeys ?? []),
             includeCandidatePool: false,
@@ -164,6 +173,7 @@ async function handler(req: NextRequest) {
           }
         );
 
+        assertInitialAIAdmission();
         // If no topics were generated for the theme, it means the AI couldn't find relevant content
         if (themedTopics.length === 0) {
           console.log(`[video-analysis] No content found for theme: "${theme}"`);
@@ -196,6 +206,8 @@ async function handler(req: NextRequest) {
 
         return response;
       } catch (error) {
+        const intentResponse = initialAnalysisErrorResponse(error);
+        if (intentResponse) return intentResponse;
         if (error instanceof DependencyUnavailableError) throw error;
         console.error('Error generating theme-specific topics:', error);
         return respondWithNoCredits(
@@ -386,6 +398,7 @@ async function handler(req: NextRequest) {
       return response;
     }
 
+    requireInitialAnalysisContext();
     const generationResult = await generateTopicsFromTranscript(
       transcript,
       {
@@ -396,6 +409,7 @@ async function handler(req: NextRequest) {
         language: videoInfo?.language
       }
     );
+    assertInitialAIAdmission();
     const topics = generationResult.topics;
     const topicCandidates = generationResult.candidates;
     const modelUsed = generationResult.modelUsed;
@@ -457,7 +471,7 @@ async function handler(req: NextRequest) {
     // No additional paid work until required persistence has succeeded.
     let themes: string[] = [];
     try {
-      themes = await generateThemesFromTranscript(transcript, videoInfo, undefined, videoInfo?.language);
+      themes = await initialThemeDiscovery(() => generateThemesFromTranscript(transcript, videoInfo, undefined, videoInfo?.language));
     } catch (error) {
       if (error instanceof DependencyUnavailableError) throw error;
       console.error('Error generating themes');
@@ -482,6 +496,8 @@ async function handler(req: NextRequest) {
 
     return response;
   } catch (error) {
+    const intentResponse = initialAnalysisErrorResponse(error);
+    if (intentResponse) return intentResponse;
     if (error instanceof DependencyUnavailableError) {
       const response = unavailableResponse();
       return new NextResponse(response.body, { status: 503, headers: response.headers });
@@ -497,4 +513,4 @@ async function handler(req: NextRequest) {
   }
 }
 
-export const POST = withSecurity(handler, SECURITY_PRESETS.PAID);
+export const POST = withSecurity(withInitialAnalysis('highlights', handler, { allowCachedAnalysis: true }), SECURITY_PRESETS.PAID);

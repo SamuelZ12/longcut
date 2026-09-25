@@ -2,6 +2,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const direct = vi.hoisted(() => vi.fn());
+// This suite isolates native-provider outcomes; initial intent is covered with real SQL in initial-analysis-db.
+vi.mock('@/lib/initial-analysis-spend', () => ({ withInitialAnalysis: (_operation: unknown, handler: unknown) => handler }));
 vi.mock('@/lib/security-middleware', () => ({ withSecurity: (handler: unknown) => handler, SECURITY_PRESETS: { PAID: {} } }));
 vi.mock('@/lib/youtube-transcript-provider', () => ({ fetchYouTubeTranscript: direct }));
 vi.mock('@/lib/mock-data', () => ({ shouldUseMockData: () => false }));

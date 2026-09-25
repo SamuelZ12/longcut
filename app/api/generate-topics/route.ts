@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { withInitialAnalysis } from '@/lib/initial-analysis-spend';
 import {
   generateTopicsRequestSchema,
   formatValidationError
@@ -66,7 +67,7 @@ async function handler(request: NextRequest) {
 }
 
 // Apply security with generation rate limits (dynamic based on auth)
-export const POST = withSecurity(handler, {
+export const POST = withSecurity(withInitialAnalysis('highlights', handler), {
   paidWork: true,
   maxBodySize: 10 * 1024 * 1024, // 10MB for large transcripts
   allowedMethods: ['POST']

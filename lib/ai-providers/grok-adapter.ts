@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { initialAIAttempt } from '../initial-ai-context';
 import type { ProviderAdapter, ProviderGenerateParams, ProviderGenerateResult } from './types';
 
 const DEFAULT_MODEL = 'grok-4-1-fast-non-reasoning';
@@ -184,7 +185,8 @@ export function createGrokAdapter(): ProviderAdapter {
 
       try {
         const payload = buildPayload(params);
-        const response = await fetch(`${baseUrl}/chat/completions`, {
+        const { responseText } = await initialAIAttempt(async () => {
+          const response = await fetch(`${baseUrl}/chat/completions`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -192,9 +194,17 @@ export function createGrokAdapter(): ProviderAdapter {
           },
           body: JSON.stringify(payload),
           signal: controller?.signal,
+          });
+          const responseText = await response.text();
+          if (!response.ok) {
+            let errorBody;
+            try { errorBody = JSON.parse(responseText); } catch { /* Preserve HTTP status even for non-JSON errors. */ }
+            const message = errorBody?.error?.message || errorBody?.message || response.statusText || 'Unknown error';
+            const code = errorBody?.error?.code || errorBody?.code;
+            throw Object.assign(new Error(`Grok API error${code ? ` (${code})` : ''}: ${message}`), { status: response.status });
+          }
+          return { responseText };
         });
-
-        const responseText = await response.text();
         let parsed: any;
 
         try {
@@ -202,18 +212,6 @@ export function createGrokAdapter(): ProviderAdapter {
         } catch (parseError) {
           console.error('[Grok] Failed to parse JSON response', parseError);
           throw new Error('Grok API returned a non-JSON response.');
-        }
-
-        if (!response.ok) {
-          const message =
-            parsed?.error?.message ||
-            parsed?.message ||
-            response.statusText ||
-            'Unknown error';
-          const code = parsed?.error?.code || parsed?.code;
-          throw new Error(
-            `Grok API error${code ? ` (${code})` : ''}: ${message}`
-          );
         }
 
         const latencyMs = Date.now() - requestStartedAt;
@@ -244,4 +242,3 @@ export function createGrokAdapter(): ProviderAdapter {
     },
   };
 }
-

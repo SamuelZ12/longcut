@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { withInitialAnalysis } from '@/lib/initial-analysis-spend';
 import { TranscriptSegment, Topic } from '@/lib/types';
 import { withSecurity } from '@/lib/security-middleware';
 import { RATE_LIMITS } from '@/lib/rate-limiter';
@@ -180,7 +181,7 @@ ${fullTranscript}
 }
 
 // Apply security with dedicated rate limit for suggested questions
-export const POST = withSecurity(handler, {
+export const POST = withSecurity(withInitialAnalysis('questions', handler), {
   paidWork: true,
   rateLimit: RATE_LIMITS.SUGGESTED_QUESTIONS, // Lightweight, chat-like operation
   maxBodySize: 10 * 1024 * 1024, // 10MB for large transcripts

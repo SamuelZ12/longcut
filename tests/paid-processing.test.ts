@@ -47,6 +47,7 @@ vi.mock('@/lib/supabase/admin', () => ({ createServiceRoleClient: () => ({
     if (name === 'guest_usage_server') return { data: state.guestUsed || args.p_record, error: state.guestError };
     if (name === 'reserve_transcript_spend') return { data: { allowed: true, reservation_id: 'test-reservation' }, error: null };
     if (name === 'transition_transcript_spend') return { data: true, error: null };
+    if (name === 'claim_initial_analysis_operation' || name === 'finish_initial_analysis_operation') return { data: true, error: null };
     throw new Error(`Unexpected service RPC ${name}`);
   },
 }) }));
@@ -88,7 +89,8 @@ const payload = {
   transcript: [{ text: 'A useful insight.', start: 0, duration: 10 }],
 };
 const request = (path: string, body = payload) => new NextRequest(`http://localhost/api/${path}`, {
-  method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' },
+  method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json',
+    'x-analysis-flow': '00000000-0000-4000-8000-000000000001', 'x-analysis-video': 'abcdefghijk' },
 });
 const failure = { code: 'exceed_db_size_quota', message: 'sensitive body and credentials' };
 const noPaidCalls = () => {

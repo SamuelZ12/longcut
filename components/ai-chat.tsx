@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect, useCallback, RefObject, Fragment, useMemo } from "react";
 import { z } from "zod";
+import { requestAnalysisIntent } from '@/lib/initial-analysis-client';
+import { AbortManager } from '@/lib/promise-utils';
 import { ChatMessage, TranscriptSegment, Topic, Citation, NoteSource, NoteMetadata, VideoInfo, TranslationRequestHandler } from "@/lib/types";
 import { SelectionActions, SelectionActionPayload, triggerExplainSelection, EXPLAIN_SELECTION_EVENT } from "@/components/selection-actions";
 import { ChatMessageComponent } from "./chat-message";
@@ -137,7 +139,7 @@ export function AIChat({
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
-  const [loadingQuestions, setLoadingQuestions] = useState(false);
+  const loadingQuestions = false;
   const [followUpQuestions, setFollowUpQuestions] = useState<string[]>([]);
   const [loadingFollowUps, setLoadingFollowUps] = useState(false);
   const [followUpAnchorId, setFollowUpAnchorId] = useState<string | null>(null);
@@ -156,6 +158,11 @@ export function AIChat({
   const dismissedQuestionsRef = useRef<Set<string>>(new Set());
   const followUpQuestionsRef = useRef<string[]>([]);
   const followUpRequestIdRef = useRef(0);
+  const initialRequests = useRef(new AbortManager());
+  useEffect(() => {
+    const manager = initialRequests.current;
+    return () => manager.cleanup();
+  }, [videoId]);
   const isComposingRef = useRef(false);
 
   useEffect(() => {
@@ -390,54 +397,6 @@ export function AIChat({
     };
   }, [selectedLanguage, onRequestTranslation]);
 
-  const fetchSuggestedQuestions = useCallback(async () => {
-    setLoadingQuestions(true);
-    try {
-      const response = await paidFetch("/api/suggested-questions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          transcript,
-          topics: sanitizedTopicsForChat,
-          videoTitle,
-          count: 3,
-          exclude: Array.from(dismissedQuestionsRef.current),
-          ...(selectedLanguage && { targetLanguage: selectedLanguage }),
-        }),
-      });
-      
-      if (response.ok) {
-        let data: unknown;
-        try {
-          data = await response.json();
-        } catch (error) {
-          console.error("Failed to parse suggested questions response:", error);
-          applyFallbackSuggestedQuestions();
-          return;
-        }
-
-        const questions = Array.isArray((data as any)?.questions)
-          ? (data as any).questions
-              .filter((item: unknown): item is string => typeof item === "string" && item.trim().length > 0)
-              .map((item: string) => item.trim())
-          : [];
-
-        if (questions.length > 0) {
-          setSuggestedQuestions(questions);
-        } else {
-          applyFallbackSuggestedQuestions();
-        }
-      } else {
-        console.error("Suggested questions request failed:", response.status, response.statusText);
-        applyFallbackSuggestedQuestions();
-      }
-    } catch (error) {
-      console.error("Error fetching suggested questions:", error);
-      applyFallbackSuggestedQuestions();
-    } finally {
-      setLoadingQuestions(false);
-    }
-  }, [transcript, sanitizedTopicsForChat, videoTitle, applyFallbackSuggestedQuestions, selectedLanguage, paidFetch]);
   // Update suggested questions when cached questions change
   useEffect(() => {
     if (cachedSuggestedQuestions && cachedSuggestedQuestions.length > 0) {
@@ -445,12 +404,12 @@ export function AIChat({
     }
   }, [cachedSuggestedQuestions]);
 
-  // Only fetch new questions if we don't have cached ones
+  // Opening a public/cached page never starts question generation.
   useEffect(() => {
     if (transcript.length > 0 && suggestedQuestions.length === 0 && !cachedSuggestedQuestions) {
-      void fetchSuggestedQuestions();
+      applyFallbackSuggestedQuestions();
     }
-  }, [transcript, cachedSuggestedQuestions, suggestedQuestions.length, fetchSuggestedQuestions]);
+  }, [transcript, cachedSuggestedQuestions, suggestedQuestions.length, applyFallbackSuggestedQuestions]);
 
   const requestFollowUpQuestions = useCallback(async (lastQuestion?: string) => {
     const excludeAccumulator = new Set<string>();
@@ -797,9 +756,13 @@ export function AIChat({
           description: videoInfo?.description,
         };
 
+        const controller = initialRequests.current.createController('summary', 60000);
+        const flowId = await requestAnalysisIntent(videoId, controller.signal);
+        controller.signal.throwIfAborted();
         const summaryResponse = await paidFetch("/api/generate-summary", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          headers: { "Content-Type": "application/json", 'x-analysis-flow': flowId, 'x-analysis-video': videoId },
           body: JSON.stringify({
             transcript,
             videoInfo: requestVideoInfo,
@@ -848,6 +811,7 @@ export function AIChat({
           return next;
         });
       } finally {
+        initialRequests.current.cleanup('summary');
         setIsLoading(false);
         if (followUpPromise) {
           const { id, questions, error } = await followUpPromise;

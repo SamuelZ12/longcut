@@ -4,6 +4,7 @@ import {
   type GenerationConfig,
 } from '@google/generative-ai';
 import { z } from 'zod';
+import { initialAIAttempt } from '../initial-ai-context';
 import type { ProviderAdapter, ProviderGenerateParams, ProviderGenerateResult } from './types';
 
 const PROVIDER_NAME = 'gemini';
@@ -222,9 +223,9 @@ export function createGeminiAdapter(): ProviderAdapter {
           });
 
           const requestStart = Date.now();
-          const generatePromise = model.generateContent(params.prompt);
-
-          const result = params.timeoutMs
+          const result = await initialAIAttempt(async () => {
+            const generatePromise = model.generateContent(params.prompt);
+            return params.timeoutMs
             ? await Promise.race([
                 generatePromise,
                 new Promise((_, reject) =>
@@ -234,7 +235,8 @@ export function createGeminiAdapter(): ProviderAdapter {
                   )
                 ),
               ])
-            : await generatePromise;
+              : await generatePromise;
+          });
 
           const latencyMs = Date.now() - requestStart;
           const geminiResponse = (result as any).response;

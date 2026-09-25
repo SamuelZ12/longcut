@@ -45,20 +45,9 @@ test('generate highlights reveals cached topics locally before calling video-ana
   assert.match(handleSource, /cachedHighlightPayloadRef\.current = null/);
 
   const cachedRevealIndex = handleSource.indexOf('applyHighlightResponse(cachedHighlightPayload');
-  const fetchIndex = handleSource.indexOf('paidFetch("/api/video-analysis"');
+  const fetchIndex = handleSource.indexOf('initialPaidFetch("/api/video-analysis"');
   assert.ok(cachedRevealIndex > -1 && fetchIndex > -1 && cachedRevealIndex < fetchIndex);
 });
 
-test('cached reveal skips suggested question generation when cached questions exist', () => {
-  const handleSource = getHandleGenerateHighlightsSource();
-  const cachedRevealIndex = handleSource.indexOf('applyHighlightResponse(cachedHighlightPayload');
-  assert.notEqual(cachedRevealIndex, -1, 'Expected cached reveal branch to apply cached highlights');
-
-  const cachedRevealSource = handleSource.slice(cachedRevealIndex, handleSource.indexOf('const requestKey', cachedRevealIndex));
-  assert.match(cachedRevealSource, /cachedSuggestedQuestions\?\.length/);
-  assert.match(cachedRevealSource, /generateSuggestedQuestionsForTopics\(generatedTopics, transcript, videoInfo\)/);
-
-  const guardIndex = cachedRevealSource.indexOf('cachedSuggestedQuestions?.length');
-  const generateIndex = cachedRevealSource.indexOf('generateSuggestedQuestionsForTopics(generatedTopics, transcript, videoInfo)');
-  assert.ok(guardIndex > -1 && generateIndex > -1 && guardIndex < generateIndex);
-});
+// Cached reveal's zero-paid-work behavior is exercised by rendered UI and counters
+// in tests/analysis-unavailable.test.tsx rather than asserting a particular source shape.

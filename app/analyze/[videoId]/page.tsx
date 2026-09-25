@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { requestAnalysisIntent, takeAnalysisIntent } from '@/lib/initial-analysis-client';
 import { RightColumnTabs, type RightColumnTabsHandle } from "@/components/right-column-tabs";
 import { YouTubePlayer, type YouTubePlayerHandle } from "@/components/youtube-player";
 import { HighlightsPanel } from "@/components/highlights-panel";
@@ -234,7 +235,10 @@ export default function AnalyzePage() {
   const rightColumnTabsRef = useRef<RightColumnTabsHandle>(null);
   const youtubePlayerRef = useRef<YouTubePlayerHandle | null>(null);
   const abortManager = useRef(new AbortManager());
+  const activeInitialization = useRef<AbortController | null>(null);
   const paidWorkBlocked = useRef(false);
+  const analysisFlow = useRef<{ id: string; videoId: string } | null>(null);
+  const [needsAnalysisIntent, setNeedsAnalysisIntent] = useState(false);
   const stopPaidWork = useCallback(() => {
     paidWorkBlocked.current = true;
     abortManager.current.cleanup();
@@ -242,6 +246,7 @@ export default function AnalyzePage() {
   }, []);
   const paidFetch = useCallback(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (paidWorkBlocked.current) throw new DependencyUnavailableError('paid-work');
+    init?.signal?.throwIfAborted();
     const response = await fetch(input, init);
     if (response.status === 503) {
       stopPaidWork();
@@ -249,6 +254,14 @@ export default function AnalyzePage() {
     }
     return response;
   }, [stopPaidWork]);
+  const initialPaidFetch = useCallback((input: RequestInfo | URL, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    if (analysisFlow.current) {
+      headers.set('x-analysis-flow', analysisFlow.current.id);
+      headers.set('x-analysis-video', analysisFlow.current.videoId);
+    }
+    return paidFetch(input, { ...init, headers });
+  }, [paidFetch]);
   const persistAnalysisUpdate = useCallback(async (body: Record<string, unknown>) => {
     try {
       const response = await csrfFetch.post('/api/update-video-analysis', body);
@@ -602,6 +615,7 @@ export default function AnalyzePage() {
     const currentAbortManager = abortManager.current;
     return () => {
       // Abort all pending requests when component unmounts
+      activeInitialization.current = null;
       currentAbortManager.cleanup();
     };
   }, []);
@@ -628,16 +642,30 @@ export default function AnalyzePage() {
   const processVideo = useCallback(async (
     url: string,
     selectedMode: TopicGenerationMode,
-    preferredLanguage?: string
+    preferredLanguage?: string,
+    intentional = false
   ) => {
+    abortManager.current.cleanup();
+    // One deadline covers lookup, admission, acquisition, and parsing. Background AI
+    // receives its own deadline only after initialization finishes successfully.
+    const processController = abortManager.current.createController('process-video', 60000,
+      new DOMException('Analysis initialization timed out. Please try again.', 'TimeoutError'));
+    activeInitialization.current = processController;
     try {
       const extractedVideoId = extractVideoId(url);
       if (!extractedVideoId) {
         throw new Error("Invalid YouTube URL");
       }
 
-      // Cleanup any pending requests from previous analysis
-      abortManager.current.cleanup();
+      const submittedFlow = takeAnalysisIntent(extractedVideoId);
+      const hasIntent = intentional || Boolean(submittedFlow);
+      analysisFlow.current = submittedFlow ? { id: submittedFlow, videoId: extractedVideoId } : null;
+      setNeedsAnalysisIntent(false);
+      const ensureIntent = async () => {
+        processController.signal.throwIfAborted();
+        if (!analysisFlow.current) analysisFlow.current = { id: await requestAnalysisIntent(extractedVideoId, processController.signal), videoId: extractedVideoId };
+      };
+
       paidWorkBlocked.current = false;
       handleLanguageChange(null);
       pendingThemeRequestsRef.current.clear();
@@ -697,6 +725,7 @@ export default function AnalyzePage() {
       if (!forceRegenerate && !shouldSkipCacheForLanguage) {
         const cacheResponse = await fetchAnalysisDependency("/api/check-video-cache", {
           method: "POST",
+          signal: processController.signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url })
         });
@@ -705,6 +734,7 @@ export default function AnalyzePage() {
 
         if (cacheResponse.ok) {
           const cacheData = await cacheResponse.json().catch(() => { throw new Error(SERVICE_UNAVAILABLE_MESSAGE); });
+          processController.signal.throwIfAborted();
           if (!cacheData || !['found', 'absent'].includes(cacheData.status) ||
               cacheData.cached !== (cacheData.status === 'found')) {
             throw new Error(SERVICE_UNAVAILABLE_MESSAGE);
@@ -769,23 +799,31 @@ export default function AnalyzePage() {
 
               setIsShareReady(true);
 
-              // Auto-start takeaways generation if not available
+              // Missing cached content is generated only by an explicit action.
               if (!cacheData.summary) {
-                const eligibility = await fetchAnalysisDependency('/api/check-limit');
+                if (!hasIntent) {
+                  setNeedsAnalysisIntent(true);
+                  return;
+                }
+                await ensureIntent();
+                const eligibility = await fetchAnalysisDependency('/api/check-limit', { signal: processController.signal });
                 if (!eligibility.ok) throw new Error(SERVICE_UNAVAILABLE_MESSAGE);
                 const decision = await eligibility.json();
+                processController.signal.throwIfAborted();
                 if (!decision.canGenerate) {
                   setTakeawaysError('Summary is not available. Sign in or check your analysis allowance to generate it.');
                   return;
                 }
                 setShowChatTab(true);
                 setIsGeneratingTakeaways(true);
+                const summaryController = abortManager.current.createController('cached-summary', 60000);
 
                 backgroundOperation(
                   'generate-cached-takeaways',
                   async () => {
-                    const summaryRes = await paidFetch("/api/generate-summary", {
+                    const summaryRes = await initialPaidFetch("/api/generate-summary", {
                       method: "POST",
+                      signal: summaryController.signal,
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
                         transcript: sanitizedTranscript,
@@ -803,6 +841,7 @@ export default function AnalyzePage() {
                     }
 
                     const { summaryContent: generatedTakeaways } = await summaryRes.json();
+                    summaryController.signal.throwIfAborted();
                     setTakeawaysContent(generatedTakeaways);
 
                     // Update the video analysis with the takeaways (requires auth + ownership)
@@ -826,6 +865,7 @@ export default function AnalyzePage() {
                     setTakeawaysError(error.message || "Failed to generate takeaways. Please try again.");
                   }
                 ).finally(() => {
+                  if (abortManager.current.getSignal('cached-summary') === summaryController.signal) abortManager.current.cleanup('cached-summary');
                   setIsGeneratingTakeaways(false);
                 });
               }
@@ -838,9 +878,15 @@ export default function AnalyzePage() {
         }
       }
 
-      const eligibility = await fetchAnalysisDependency('/api/check-limit');
+      if (!hasIntent) {
+        setNeedsAnalysisIntent(true);
+        return;
+      }
+      await ensureIntent();
+      const eligibility = await fetchAnalysisDependency('/api/check-limit', { signal: processController.signal });
       if (!eligibility.ok) throw new Error(SERVICE_UNAVAILABLE_MESSAGE);
       const decision = await eligibility.json();
+      processController.signal.throwIfAborted();
       if (!decision.canGenerate) {
         throw new Error(decision.requiresAuth ? GUEST_LIMIT_MESSAGE : AUTH_LIMIT_MESSAGE);
       }
@@ -848,17 +894,12 @@ export default function AnalyzePage() {
       setPageState('ANALYZING_NEW');
       setLoadingStage('fetching');
 
-      // Not cached, proceed with normal flow
-      // Create AbortControllers for both requests
-      const transcriptController = abortManager.current.createController('transcript', 300000);
-      const videoInfoController = abortManager.current.createController('videoInfo', 100000);
-
       // Fetch transcript and video info in parallel
-      const transcriptPromise = paidFetch("/api/transcript", {
+      const transcriptPromise = initialPaidFetch("/api/transcript", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url, lang: preferredLanguage }),
-        signal: transcriptController.signal,
+        signal: processController.signal,
       }).catch(err => {
         if (paidWorkBlocked.current) throw new Error(SERVICE_UNAVAILABLE_MESSAGE);
         if (err.name === 'AbortError') {
@@ -871,7 +912,7 @@ export default function AnalyzePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
-        signal: videoInfoController.signal,
+        signal: processController.signal,
       }).catch(err => {
         if (err.name === 'AbortError') {
           console.error("Video info request timed out");
@@ -886,8 +927,7 @@ export default function AnalyzePage() {
         transcriptPromise,
         videoInfoPromise
       ]);
-
-      // AbortManager handles timeout cleanup automatically
+      processController.signal.throwIfAborted();
 
       // Process transcript response (required)
       if (!transcriptRes || !transcriptRes.ok) {
@@ -912,6 +952,7 @@ export default function AnalyzePage() {
       let transcriptIsPartial: boolean | undefined;
       try {
         const data = await transcriptRes.json();
+        processController.signal.throwIfAborted();
         fetchedTranscript = data.transcript;
         language = data.language;
         availableLanguages = data.availableLanguages;
@@ -943,6 +984,7 @@ export default function AnalyzePage() {
       if (videoInfoRes && videoInfoRes.ok) {
         try {
           const videoInfoData = await videoInfoRes.json();
+          processController.signal.throwIfAborted();
           if (videoInfoData && !videoInfoData.error) {
             fetchedVideoInfo = {
               ...videoInfoData,
@@ -984,12 +1026,14 @@ export default function AnalyzePage() {
         }
       }
 
+      // Parsing also awaits I/O: never revive cancelled initialization with new controllers.
+      processController.signal.throwIfAborted();
       // Move to understanding stage
       setLoadingStage('understanding');
 
       // Generate quick preview (non-blocking)
       const previewController = abortManager.current.createController('preview', 30000);
-      paidFetch("/api/quick-preview", {
+      initialPaidFetch("/api/quick-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: previewController.signal,
@@ -1029,7 +1073,7 @@ export default function AnalyzePage() {
       backgroundOperation(
         'generate-takeaways',
         async () => {
-          const summaryRes = await paidFetch("/api/generate-summary", {
+          const summaryRes = await initialPaidFetch("/api/generate-summary", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1085,22 +1129,30 @@ export default function AnalyzePage() {
       });
 
     } catch (err) {
+      if (activeInitialization.current !== processController) return;
+      if (processController.signal.aborted && processController.signal.reason?.name !== 'TimeoutError') return;
       setError(
         normalizeErrorMessage(
-          err instanceof Error ? err.message : undefined,
+          processController.signal.reason?.name === 'TimeoutError'
+            ? processController.signal.reason.message
+            : err instanceof Error ? err.message : undefined,
           "An error occurred"
         )
       );
     } finally {
-      setPageState('IDLE');
-      setLoadingStage(null);
-      setSwitchingToLanguage(null);
+      if (abortManager.current.getSignal('process-video') === processController.signal) abortManager.current.cleanup('process-video');
+      if (activeInitialization.current === processController) {
+        activeInitialization.current = null;
+        setPageState('IDLE');
+        setLoadingStage(null);
+        setSwitchingToLanguage(null);
+      }
     }
   }, [
     storeCurrentVideoForAuth,
     videoId,
     forceRegenerate,
-    paidFetch,
+    initialPaidFetch,
     stopPaidWork,
     persistAnalysisUpdate,
     handleLanguageChange
@@ -1239,18 +1291,20 @@ export default function AnalyzePage() {
     return generatedTopics;
   }, []);
 
-  const generateSuggestedQuestionsForTopics = useCallback((
+  const generateSuggestedQuestionsForTopics = useCallback(async (
     generatedTopics: Topic[],
     sourceTranscript: TranscriptSegment[],
-    sourceVideoInfo: VideoInfo | null
+    sourceVideoInfo: VideoInfo | null,
+    signal: AbortSignal
   ) => {
     if (!videoId) return;
 
-    backgroundOperation(
+    await backgroundOperation(
       'generate-questions',
       async () => {
-        const res = await paidFetch("/api/suggested-questions", {
+        const res = await initialPaidFetch("/api/suggested-questions", {
           method: "POST",
+          signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             transcript: sourceTranscript,
@@ -1285,6 +1339,7 @@ export default function AnalyzePage() {
           console.error("Failed to parse suggested questions payload:", error);
           return applyCachedQuestions(buildSuggestedQuestionFallbacks(3));
         }
+        signal.throwIfAborted();
 
         const questions = Array.isArray((parsed as any)?.questions)
           ? (parsed as any).questions
@@ -1319,7 +1374,7 @@ export default function AnalyzePage() {
         console.error("Failed to generate suggested questions:", error);
       }
     );
-  }, [videoId, paidFetch, stopPaidWork, persistAnalysisUpdate]);
+  }, [videoId, initialPaidFetch, stopPaidWork, persistAnalysisUpdate]);
 
   const confirmShareReady = useCallback((url: string) => {
     backgroundOperation(
@@ -1365,23 +1420,27 @@ export default function AnalyzePage() {
     ) {
       setHighlightGenerationError(null);
       setIsRateLimitError(false);
-      const generatedTopics = applyHighlightResponse(cachedHighlightPayload, transcript);
+      applyHighlightResponse(cachedHighlightPayload, transcript);
       cachedHighlightPayloadRef.current = null;
-      if (!cachedSuggestedQuestions?.length) {
-        generateSuggestedQuestionsForTopics(generatedTopics, transcript, videoInfo);
-      }
       return;
     }
 
     const requestKey = 'highlights';
-    const controller = abortManager.current.createController(requestKey);
+    const controller = abortManager.current.createController(requestKey, 60000);
     setHighlightGenerationError(null);
     setHighlightGenerationStartTime(Date.now());
     setIsGeneratingHighlights(true);
     setIsRateLimitError(false);
 
     try {
-      const response = await paidFetch("/api/video-analysis", {
+      if (!analysisFlow.current || analysisFlow.current.videoId !== videoId) {
+        analysisFlow.current = { id: await requestAnalysisIntent(videoId, controller.signal), videoId };
+      }
+      controller.signal.throwIfAborted();
+      // Optional questions precede the final highlight/credit operation, which closes this flow.
+      await generateSuggestedQuestionsForTopics([], transcript, videoInfo, controller.signal);
+      controller.signal.throwIfAborted();
+      const response = await initialPaidFetch("/api/video-analysis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1417,10 +1476,9 @@ export default function AnalyzePage() {
       }
 
       const topicsData = await response.json();
-      const generatedTopics = applyHighlightResponse(topicsData, transcript);
+      applyHighlightResponse(topicsData, transcript);
       checkRateLimit();
       confirmShareReady(normalizedUrl);
-      generateSuggestedQuestionsForTopics(generatedTopics, transcript, videoInfo);
     } catch (error) {
       const isAbortError =
         typeof error === "object" &&
@@ -1437,6 +1495,7 @@ export default function AnalyzePage() {
         );
       }
     } finally {
+      analysisFlow.current = null;
       abortManager.current.cleanup(requestKey);
       setHighlightGenerationStartTime(null);
       setIsGeneratingHighlights(false);
@@ -1448,14 +1507,13 @@ export default function AnalyzePage() {
     videoInfo,
     mode,
     forceRegenerate,
-    cachedSuggestedQuestions,
     redirectToAuthForLimit,
     checkRateLimit,
     applyHighlightResponse,
     confirmShareReady,
     normalizedUrl,
     generateSuggestedQuestionsForTopics,
-    paidFetch
+    initialPaidFetch
   ]);
 
   useEffect(() => {
@@ -1902,7 +1960,19 @@ export default function AnalyzePage() {
       )}
 
       {pageState === 'IDLE' && error === SERVICE_UNAVAILABLE_MESSAGE && (
-        <ServiceUnavailable onRetry={() => processVideo(normalizedUrl, mode)} />
+        <ServiceUnavailable onRetry={() => processVideo(normalizedUrl, mode, undefined, true)} />
+      )}
+
+      {pageState === 'IDLE' && needsAnalysisIntent && !error && (
+        <section className="mx-auto my-6 max-w-2xl px-5 text-center">
+          <h2 className="text-xl font-semibold">{transcript.length ? 'Summary not generated yet' : 'Ready to analyze this video'}</h2>
+          <p className="my-3 text-sm text-slate-600">Start analysis to generate missing content using your available allowance.</p>
+          <button type="button" disabled={isModeLoading}
+            onClick={() => processVideo(normalizedUrl, mode, undefined, true)}
+            className="rounded-full bg-slate-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-50">
+            {transcript.length ? 'Generate missing summary' : 'Analyze video'}
+          </button>
+        </section>
       )}
 
       {pageState === 'IDLE' && videoId && topics.length === 0 && error && error !== SERVICE_UNAVAILABLE_MESSAGE && (
@@ -1942,7 +2012,7 @@ export default function AnalyzePage() {
                 {!isRateLimitError && (
                   <button
                     type="button"
-                    onClick={() => processVideo(normalizedUrl, mode)}
+                    onClick={() => processVideo(normalizedUrl, mode, undefined, true)}
                     className="inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white transition hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-50"
                     disabled={isModeLoading}
                   >
@@ -2067,7 +2137,7 @@ export default function AnalyzePage() {
                          // Only re-fetch if it's different from current
                          // Set language switching state for loading indicator
                          setSwitchingToLanguage(langCode);
-                         processVideo(normalizedUrl, mode, langCode);
+                          processVideo(normalizedUrl, mode, langCode, true);
                          // Clear any translation override
                          handleLanguageChange(null);
                       }

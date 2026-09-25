@@ -69,7 +69,7 @@ export class AbortManager {
   private controllers = new Map<string, AbortController>();
   private timeouts = new Map<string, NodeJS.Timeout>();
 
-  createController(key: string, timeoutMs?: number): AbortController {
+  createController(key: string, timeoutMs?: number, timeoutReason?: unknown): AbortController {
     // Cleanup existing controller if any
     this.cleanup(key);
 
@@ -78,7 +78,7 @@ export class AbortManager {
 
     if (timeoutMs) {
       const timeoutId = setTimeout(() => {
-        controller.abort();
+        controller.abort(timeoutReason);
         this.controllers.delete(key);
         this.timeouts.delete(key);
       }, timeoutMs);

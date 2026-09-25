@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { initialAIAttempt } from '../initial-ai-context';
 import type { ProviderAdapter, ProviderGenerateParams, ProviderGenerateResult } from './types';
 
 const PROVIDER_NAME = 'minimax';
@@ -247,7 +248,8 @@ export function createMiniMaxAdapter(): ProviderAdapter {
       const requestStartedAt = Date.now();
 
       try {
-        const response = await fetch(`${baseUrl}/chat/completions`, {
+        const { responseText } = await initialAIAttempt(async () => {
+          const response = await fetch(`${baseUrl}/chat/completions`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -255,19 +257,21 @@ export function createMiniMaxAdapter(): ProviderAdapter {
           },
           body: JSON.stringify(payload),
           signal: controller?.signal,
+          });
+          const responseText = await response.text();
+          if (!response.ok) {
+            let errorBody;
+            try { errorBody = JSON.parse(responseText); } catch { /* Preserve HTTP status even for non-JSON errors. */ }
+            throw Object.assign(buildMiniMaxError(response, errorBody), { status: response.status });
+          }
+          return { responseText };
         });
-
-        const responseText = await response.text();
         let parsed: any;
 
         try {
           parsed = responseText ? JSON.parse(responseText) : undefined;
         } catch {
           throw new Error('MiniMax API returned a non-JSON response.');
-        }
-
-        if (!response.ok) {
-          throw buildMiniMaxError(response, parsed);
         }
 
         const latencyMs = Date.now() - requestStartedAt;

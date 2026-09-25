@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+// Keep this predecessor suite focused on the native ledger. The initial-analysis DB suite composes both ledgers.
+vi.mock('@/lib/initial-analysis-spend', () => ({ withInitialAnalysis: (_operation: unknown, handler: unknown) => handler }));
 
 // Invoked by the disposable-cluster harness; never accepts a database URL or credentials.
 const state = vi.hoisted(() => ({ user: { id: 'one' } as { id: string } | null,

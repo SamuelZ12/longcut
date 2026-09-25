@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+// Isolate ticket03 vendor accounting; ticket04's real intent boundary has its own DB suite.
+vi.mock('@/lib/initial-analysis-spend', () => ({ withInitialAnalysis: (_operation: unknown, handler: unknown) => handler }));
 
 const state = vi.hoisted(() => ({
   user: { id: '00000000-0000-4000-8000-000000000001' } as any,

@@ -1,6 +1,8 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { requestAnalysisIntent, storeAnalysisIntent } from '@/lib/initial-analysis-client';
+import { AbortManager } from '@/lib/promise-utils';
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { UrlInput } from "@/components/url-input";
@@ -26,6 +28,15 @@ function HomeContent() {
   const [isFeelingLucky, setIsFeelingLucky] = useState(false);
   const authPromptHandled = useRef(false);
   const { mode, setMode } = useModePreference();
+  const submissionRequests = useRef(new AbortManager());
+  const activeSubmission = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const manager = submissionRequests.current;
+    return () => {
+      activeSubmission.current = null;
+      manager.cleanup();
+    };
+  }, []);
 
   useEffect(() => {
     if (!searchParams) return;
@@ -132,7 +143,7 @@ function HomeContent() {
   }, [authModalOpen]);
 
   const handleSubmit = useCallback(
-    (url: string) => {
+    async (url: string) => {
       const videoId = extractVideoId(url);
       if (!videoId) {
         toast.error("Please enter a valid YouTube URL");
@@ -142,7 +153,31 @@ function HomeContent() {
       const params = new URLSearchParams();
       params.set("url", url);
 
-      router.push(`/analyze/${videoId}?${params.toString()}`);
+      const manager = submissionRequests.current;
+      const controller = manager.createController('submission', 10000,
+        new DOMException('Starting analysis timed out. Please submit the video again.', 'TimeoutError'));
+      activeSubmission.current = controller;
+      try {
+        const cache = await fetch('/api/check-video-cache', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }), signal: controller.signal });
+        if (!cache.ok) throw new Error('Unable to check this video. Please try again.');
+        const data = await cache.json();
+        controller.signal.throwIfAborted();
+        if (data.status === 'absent' && data.cached === false) {
+          storeAnalysisIntent(videoId, await requestAnalysisIntent(videoId, controller.signal));
+        } else if (data.status !== 'found' || data.cached !== true) {
+          throw new Error('Unable to check this video. Please try again.');
+        }
+        router.push(`/analyze/${videoId}?${params.toString()}`);
+      } catch (error) {
+        if (activeSubmission.current === controller) {
+          if (controller.signal.reason?.name === 'TimeoutError') toast.error(controller.signal.reason.message);
+          else if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : 'Unable to start analysis.');
+        }
+      } finally {
+        if (manager.getSignal('submission') === controller.signal) manager.cleanup('submission');
+        if (activeSubmission.current === controller) activeSubmission.current = null;
+      }
     },
     [router]
   );

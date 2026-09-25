@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { withInitialAnalysis } from '@/lib/initial-analysis-spend';
 import { TranscriptSegment } from '@/lib/types';
 import { withSecurity, SECURITY_PRESETS } from '@/lib/security-middleware';
 import { generateAIResponse } from '@/lib/ai-client';
@@ -144,4 +145,4 @@ ${trimmedPreview}
   }
 }
 
-export const POST = withSecurity(handler, SECURITY_PRESETS.PAID);
+export const POST = withSecurity(withInitialAnalysis('preview', handler), SECURITY_PRESETS.PAID);
