@@ -5,18 +5,22 @@ import { shouldUseMockData, getMockTranscript } from '@/lib/mock-data';
 import { mergeTranscriptSegmentsIntoSentences } from '@/lib/transcript-sentence-merger';
 import { NO_CREDITS_USED_MESSAGE } from '@/lib/no-credits-message';
 import { fetchYouTubeTranscript } from '@/lib/youtube-transcript-provider';
+import { fetchSupadataTranscript } from '@/lib/supadata-transcript-provider';
 
 function respondWithNoCredits(
   payload: Record<string, unknown>,
-  status: number
+  status: number,
+  requestId: string
 ) {
   return NextResponse.json(
     {
       ...payload,
+      requestId,
       creditsMessage: NO_CREDITS_USED_MESSAGE,
+      creditsScope: 'longcut_allowance',
       noCreditsUsed: true
     },
-    { status }
+    { status, headers: { 'x-request-id': requestId } }
   );
 }
 
@@ -28,17 +32,18 @@ function calculateTranscriptDuration(segments: { start: number; duration: number
 }
 
 async function handler(request: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const { url, lang, expectedDuration } = await request.json();
 
     if (!url) {
-      return respondWithNoCredits({ error: 'YouTube URL is required' }, 400);
+      return respondWithNoCredits({ error: 'YouTube URL is required' }, 400, requestId);
     }
 
     const videoId = extractVideoId(url);
 
     if (!videoId) {
-      return respondWithNoCredits({ error: 'Invalid YouTube URL' }, 400);
+      return respondWithNoCredits({ error: 'Invalid YouTube URL' }, 400, requestId);
     }
 
     if (shouldUseMockData()) {
@@ -107,52 +112,24 @@ async function handler(request: NextRequest) {
     if (!rawSegments || rawSegments.length === 0) {
       const supadataKey = process.env.SUPADATA_API_KEY;
       if (supadataKey) {
-        console.log(`[TRANSCRIPT] Falling back to Supadata for ${videoId}`);
         source = 'supadata';
-        try {
-          const apiUrl = new URL('https://api.supadata.ai/v1/transcript');
-          apiUrl.searchParams.set('url', `https://www.youtube.com/watch?v=${videoId}`);
-          if (lang) apiUrl.searchParams.set('lang', lang);
-
-          const supadataResp = await fetch(apiUrl.toString(), {
-            method: 'GET',
-            headers: { 'x-api-key': supadataKey, 'Content-Type': 'application/json' },
-          });
-
-          if (supadataResp.ok) {
-            const body = await supadataResp.json() as Record<string, unknown>;
-            const content = Array.isArray(body?.content) ? body.content
-              : Array.isArray(body?.transcript) ? body.transcript
-              : Array.isArray(body) ? body : null;
-
-            if (content && content.length > 0) {
-              // Supadata returns timestamps in either ms or seconds — detect and normalize
-              const sampleSize = Math.min(5, content.length);
-              let totalOffset = 0;
-              let offsetCount = 0;
-              for (let i = 0; i < sampleSize; i++) {
-                const val = content[i].offset ?? content[i].start ?? 0;
-                if (val > 0) { totalOffset += val; offsetCount++; }
-              }
-              const isMs = offsetCount > 0 && (totalOffset / offsetCount) > 500;
-
-              rawSegments = content.map((item: any) => ({
-                text: (item.text || item.content || '').replace(/^>>\s*/gm, ''),
-                start: isMs ? ((item.offset ?? item.start ?? 0) / 1000) : (item.offset ?? item.start ?? 0),
-                duration: isMs ? ((item.duration ?? 0) / 1000) : (item.duration ?? 0),
-              }));
-              language = typeof body?.lang === 'string' ? body.lang : undefined;
-              availableLanguages = Array.isArray(body?.availableLangs)
-                ? (body.availableLangs as unknown[]).filter((l): l is string => typeof l === 'string')
-                : undefined;
-              console.log(`[TRANSCRIPT] Supadata fallback succeeded: ${rawSegments!.length} segments`);
-            }
-          } else {
-            console.warn(`[TRANSCRIPT] Supadata returned ${supadataResp.status}`);
-          }
-        } catch (supErr) {
-          console.error(`[TRANSCRIPT] Supadata fallback failed:`, supErr instanceof Error ? supErr.message : String(supErr));
+        const result = await fetchSupadataTranscript({ videoId, lang, apiKey: supadataKey, requestId, signal: request.signal });
+        if (result.outcome !== 'success') {
+          const error = result.outcome === 'unavailable'
+            ? 'No existing captions are available for this video.'
+            : result.reason === 'unexpected_job'
+              ? 'The transcript provider unexpectedly accepted background work. No transcript is available; Longcut will not automatically resubmit this request.'
+              : result.outcome === 'unknown_upstream_acceptance'
+                ? 'The transcript request did not complete. The provider may have accepted work; Longcut will not automatically resubmit this request.'
+                : 'The transcript provider could not return usable captions.';
+          return respondWithNoCredits({
+            error, code: `TRANSCRIPT_${result.outcome.toUpperCase()}`, outcome: result.outcome,
+            reason: result.reason, source, retryable: false,
+          }, result.outcome === 'unavailable' ? 404 : result.reason === 'timeout' ? 504 : 502, requestId);
         }
+        rawSegments = result.segments;
+        language = result.language;
+        availableLanguages = result.availableLanguages;
       } else {
         console.warn(`[TRANSCRIPT] YouTube direct failed and no SUPADATA_API_KEY configured`);
       }
@@ -161,8 +138,10 @@ async function handler(request: NextRequest) {
     // ── Both methods failed ──
     if (!rawSegments || rawSegments.length === 0) {
       return respondWithNoCredits(
-        { error: 'No transcript available for this video. The video may not have subtitles enabled.' },
-        404
+        { error: 'The transcript service is unavailable. Existing captions could not be checked.',
+          code: 'TRANSCRIPT_DEPENDENCY_FAILURE', outcome: 'dependency_failure' },
+        502,
+        requestId
       );
     }
 
@@ -211,6 +190,9 @@ async function handler(request: NextRequest) {
 
     return NextResponse.json({
       videoId,
+      requestId,
+      source,
+      outcome: 'success',
       transcript: transformedTranscript,
       language,
       availableLanguages,
@@ -220,14 +202,14 @@ async function handler(request: NextRequest) {
       rawSegmentCount: rawSegments.length,
       isPartial,
       coverageRatio: coverageRatio ? Math.round(coverageRatio * 100) : undefined
-    });
+    }, { headers: { 'x-request-id': requestId } });
   } catch (error) {
     console.error('[TRANSCRIPT] Error processing transcript:', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
       type: error?.constructor?.name
     });
-    return respondWithNoCredits({ error: 'Failed to fetch transcript' }, 500);
+    return respondWithNoCredits({ error: 'Failed to fetch transcript' }, 500, requestId);
   }
 }
 
