@@ -192,6 +192,7 @@ export default function AnalyzePage() {
   const { mode, isLoading: isModeLoading } = useModePreference();
   const [error, setError] = useState("");
   const [isRateLimitError, setIsRateLimitError] = useState(false);
+  const [transcriptFailure, setTranscriptFailure] = useState<{ title: string; resetAt?: string } | null>(null);
   const [videoId, setVideoId] = useState<string | null>(null);
   // Database UUID for the video_analyses row — used to bypass youtube_id lookups
   // when saving notes, which avoids 404 errors if the row wasn't persisted earlier.
@@ -645,6 +646,7 @@ export default function AnalyzePage() {
       selectedThemeRef.current = null;
 
       setError("");
+      setTranscriptFailure(null);
       setIsRateLimitError(false);
       setTopics([]);
       setBaseTopics([]);
@@ -890,6 +892,15 @@ export default function AnalyzePage() {
       // Process transcript response (required)
       if (!transcriptRes || !transcriptRes.ok) {
         const errorData = transcriptRes ? await transcriptRes.json().catch(() => ({ error: "Unknown error" })) : { error: "Failed to fetch transcript" };
+        const titles: Record<string, string> = {
+          TRANSCRIPT_SPEND_THROTTLED: 'Fresh transcript requests paused',
+          TRANSCRIPT_ELIGIBILITY_REQUIRED: errorData.requiresAuth ? 'Sign in to continue' : 'Video allowance required',
+          TRANSCRIPT_UNAVAILABLE: 'Captions unavailable',
+          TRANSCRIPT_DEPENDENCY_FAILURE: 'Transcript service unavailable',
+          TRANSCRIPT_UNKNOWN_UPSTREAM_ACCEPTANCE: 'Transcript request not confirmed',
+        };
+        if (titles[errorData.code]) setTranscriptFailure({ title: titles[errorData.code],
+          resetAt: typeof errorData.resetAt === 'string' && Number.isFinite(Date.parse(errorData.resetAt)) ? errorData.resetAt : undefined });
         const message = buildApiErrorMessage(errorData, "Failed to fetch transcript");
         throw new Error(message);
       }
@@ -1900,13 +1911,18 @@ export default function AnalyzePage() {
             <div className="space-y-4">
               <div>
                 <h2 className="text-xl font-semibold text-slate-900">
-                  {isRateLimitError ? 'Monthly limit reached' : 'We couldn\'t finish analyzing this video'}
+                  {transcriptFailure?.title ?? (isRateLimitError ? 'Monthly limit reached' : 'We couldn\'t finish analyzing this video')}
                 </h2>
                 <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
                   {isRateLimitError
                     ? AUTH_LIMIT_MESSAGE
                     : error}
                 </p>
+                {transcriptFailure?.resetAt && (
+                  <p role="status" className="mt-2 text-sm text-slate-600">
+                    Try again after {new Date(transcriptFailure.resetAt).toLocaleString()}. No automatic retry will run.
+                  </p>
+                )}
               </div>
               <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
                 <Link

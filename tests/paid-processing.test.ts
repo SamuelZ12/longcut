@@ -45,6 +45,8 @@ vi.mock('@/lib/supabase/admin', () => ({ createServiceRoleClient: () => ({
       error: state.limiterError,
     };
     if (name === 'guest_usage_server') return { data: state.guestUsed || args.p_record, error: state.guestError };
+    if (name === 'reserve_transcript_spend') return { data: { allowed: true, reservation_id: 'test-reservation' }, error: null };
+    if (name === 'transition_transcript_spend') return { data: true, error: null };
     throw new Error(`Unexpected service RPC ${name}`);
   },
 }) }));
@@ -107,6 +109,7 @@ beforeEach(() => {
   state.upstream.mockImplementation(async () => Response.json({ content: [{ text: 'A useful insight.', offset: 0, duration: 10 }] }));
   vi.stubGlobal('fetch', state.upstream);
   vi.stubEnv('SUPADATA_API_KEY', 'local-mock-key');
+  vi.stubEnv('SUPADATA_SPEND_POLICY', 'native-v1');
 });
 
 describe('cache and public-page classification', () => {
@@ -178,6 +181,29 @@ describe('paid admission', () => {
     state.limiterError = failure;
     expect((await cache(request('check-video-cache'))).status).toBe(200);
     noPaidCalls();
+  });
+  it.each(['', 'invalid-policy'])('missing/invalid paid policy %s blocks dispatch but leaves cached public reading', async policy => {
+    vi.stubEnv('SUPADATA_SPEND_POLICY', policy);
+    expect((await transcript(request('transcript'))).status).toBe(503);
+    state.cache = { id: 'cached-id', transcript: payload.transcript, topics: [], title: 'Test' };
+    expect((await cache(request('check-video-cache'))).status).toBe(200);
+    noPaidCalls();
+  });
+  it('canonicalizes general admission across transcript query variations', async () => {
+    await transcript(request('transcript?nonce=1'));
+    await transcript(request('transcript?nonce=2'));
+    const keys = state.rpc.mock.calls.filter(([name]) => name === 'check_rate_limit_server').map(([, args]) => args.p_key);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[0]).toContain('ratelimit:/api/transcript:');
+  });
+  it('transcript-only does not charge; later highlights retain the existing single charging point', async () => {
+    state.user = { id: 'user-1' };
+    expect((await transcript(request('transcript'))).status).toBe(200);
+    expect(state.rpc.mock.calls.filter(([name]) => name === 'consume_video_credit_atomically')).toHaveLength(0);
+    expect((await analysis(request('video-analysis'))).status).toBe(200);
+    expect(state.rpc.mock.calls.filter(([name]) => name === 'consume_video_credit_atomically')).toHaveLength(1);
+    expect(state.topics).toHaveBeenCalledTimes(1);
   });
   it.each(['saveError', 'creditError'] as const)('stops further paid work after post-provider %s', async field => {
     state.user = { id: 'user-1' };

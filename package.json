@@ -6,6 +6,7 @@
     "test": "vitest run && npm run test:existing",
     "test:existing": "tsx --test lib/__tests__/*.test.ts components/__tests__/*.test.ts components/__tests__/*.test.tsx app/analyze/__tests__/*.test.ts",
     "test:limiter-db": "node scripts/test-limiter-db.mjs",
+    "test:transcript-spend-db": "node scripts/test-transcript-spend-db.mjs",
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",

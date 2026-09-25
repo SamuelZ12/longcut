@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import type { SubscriptionTier } from '@/lib/subscription-manager';
 import crypto from 'crypto';
-import { headers } from 'next/headers';
+import { trustedRequestIp } from '@/lib/trusted-request-ip';
 import { NextResponse } from 'next/server';
 import { limiterDecision } from '@/lib/limiter-store';
 import { dependencyUnavailable } from '@/lib/dependency-unavailable';
@@ -27,8 +27,7 @@ export class RateLimiter {
     const { data: { user }, error } = await supabase.auth.getUser();
     if (error && error.name !== 'AuthSessionMissingError') throw dependencyUnavailable('auth', error);
     if (user) return `user:${user.id}`;
-    const headerList = await headers();
-    const ip = headerList.get('x-forwarded-for')?.split(',')[0]?.trim() || headerList.get('x-real-ip') || 'unknown';
+    const ip = await trustedRequestIp();
     return `anon:${crypto.createHash('sha256').update(ip).digest('hex').substring(0, 16)}`;
   }
 

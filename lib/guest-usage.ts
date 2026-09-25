@@ -1,7 +1,8 @@
-import { cookies, headers } from 'next/headers'
+import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { guestUsage } from '@/lib/limiter-store'
+import { trustedRequestIp } from '@/lib/trusted-request-ip'
 
 const GUEST_TOKEN_COOKIE = 'tldw_guest_token'
 const GUEST_USED_COOKIE = 'tldw_guest_analysis_used'
@@ -14,21 +15,17 @@ export type GuestAccessState = {
   identifiers: string[]
 }
 
-async function getIpHash(): Promise<string | null> {
-  const headerList = await headers()
-  const forwardedFor = headerList.get('x-forwarded-for')
-  const realIp = headerList.get('x-real-ip')
-  const rawIp = forwardedFor?.split(',')[0]?.trim() || realIp || null
-
-  if (!rawIp) return null
-
+async function getIpHash(): Promise<string> {
+  const rawIp = await trustedRequestIp()
   return crypto.createHash('sha256').update(rawIp).digest('hex').slice(0, 32)
 }
 
 export async function getGuestAccessState(): Promise<GuestAccessState> {
   const cookieStore = await cookies()
 
-  const existingToken = cookieStore.get(GUEST_TOKEN_COOKIE)?.value
+  const rawToken = cookieStore.get(GUEST_TOKEN_COOKIE)?.value
+  const existingToken = rawToken && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(rawToken)
+    ? rawToken.toLowerCase() : undefined
   const token = existingToken || crypto.randomUUID()
   const tokenNeedsSet = !existingToken
 

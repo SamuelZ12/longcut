@@ -5,6 +5,11 @@ const direct = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/security-middleware', () => ({ withSecurity: (handler: unknown) => handler, SECURITY_PRESETS: { PAID: {} } }));
 vi.mock('@/lib/youtube-transcript-provider', () => ({ fetchYouTubeTranscript: direct }));
 vi.mock('@/lib/mock-data', () => ({ shouldUseMockData: () => false }));
+vi.mock('@/lib/transcript-spend', () => ({
+  transcriptEligibility: async () => ({ allowed: true, tier: 'free', identifiers: ['user:test'] }),
+  reserveTranscriptSpend: async () => ({ allowed: true, reservationId: 'test' }),
+  transitionTranscriptSpend: async () => {},
+}));
 import { POST } from '@/app/api/transcript/route';
 import { SUPADATA_TIMEOUT_MS } from '@/lib/supadata-transcript-provider';
 

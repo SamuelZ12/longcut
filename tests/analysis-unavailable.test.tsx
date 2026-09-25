@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 const state = vi.hoisted(() => ({
   cacheStatus: 503, limitStatus: 200, paidStatus: 200, cache: null as any,
   failNetwork: false, requests: [] as string[], paid: vi.fn(),
-  saveFails: false,
+  saveFails: false, transcriptError: null as any,
   search: new URLSearchParams(),
 }));
 vi.mock('next/navigation', () => ({
@@ -43,7 +43,7 @@ const cached = (summary: string | null = 'Existing summary') => ({
 });
 beforeEach(() => {
   Object.assign(state, { cacheStatus: 503, limitStatus: 200, paidStatus: 200,
-    cache: null, failNetwork: false, saveFails: false, requests: [], search: new URLSearchParams() });
+    cache: null, failNetwork: false, saveFails: false, transcriptError: null, requests: [], search: new URLSearchParams() });
   vi.clearAllMocks();
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -58,6 +58,7 @@ beforeEach(() => {
     if (url === '/api/check-limit') return Response.json({ canGenerate: true }, { status: state.limitStatus });
     if (url === '/api/video-info') return Response.json({ title: 'Test video', duration: 10 });
     state.paid(url);
+    if (url === '/api/transcript' && state.transcriptError) return Response.json(state.transcriptError.body, { status: state.transcriptError.status });
     return Response.json({ transcript, topics: [], summaryContent: 'Summary', preview: 'Preview' }, { status: state.paidStatus });
   }));
 });
@@ -142,4 +143,27 @@ it('rejected post-provider persistence stops additional paid work, preserving tr
   fireEvent.click(screen.getByRole('button', { name: 'Generate highlights' }));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
   expect(state.paid.mock.calls).toEqual([['/api/generate-summary']]);
+});
+
+it.each([
+  [429, 'TRANSCRIPT_SPEND_THROTTLED', 'Fresh transcript requests paused'],
+  [403, 'TRANSCRIPT_ELIGIBILITY_REQUIRED', 'Video allowance required'],
+  [404, 'TRANSCRIPT_UNAVAILABLE', 'Captions unavailable'],
+  [502, 'TRANSCRIPT_DEPENDENCY_FAILURE', 'Transcript service unavailable'],
+  [504, 'TRANSCRIPT_UNKNOWN_UPSTREAM_ACCEPTANCE', 'Transcript request not confirmed'],
+])('distinguishes transcript failure %s and retries only on explicit action', async (status, code, heading) => {
+  state.cacheStatus = 200;
+  state.transcriptError = { status, body: { code, error: 'Request could not finish.', noCreditsUsed: true,
+    ...(status === 429 ? { resetAt: '2030-01-01T00:00:00Z' } : {}) } };
+  const view = render(<AnalyzePage />);
+  await screen.findByRole('heading', { name: heading });
+  expect(screen.getByText(/No Longcut video allowance was used/)).toBeTruthy();
+  if (status === 429) expect(screen.getByText(/Try again after/)).toBeTruthy();
+  expect(state.paid.mock.calls).toEqual([['/api/transcript']]);
+  view.rerender(<AnalyzePage />);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+  expect(state.paid.mock.calls).toHaveLength(1);
+  state.transcriptError = null;
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+  await waitFor(() => expect(state.paid).toHaveBeenCalledWith('/api/generate-summary'));
 });
