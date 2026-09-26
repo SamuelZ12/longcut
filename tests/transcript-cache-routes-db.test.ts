@@ -286,19 +286,21 @@ describe.skipIf(!local)('real transcript route + cache/spend RPCs on independent
     expect(await count('transcript_spend_attempts')).toBe('1');
   });
 
-  it.each(['forged', 'expired', 'cross-user', 'completed'])('rejects %s flow before shared election without poisoning the cache key', async kind => {
+  it.each(['forged', 'expired', 'cross-user', 'completed', 'draining'])('rejects %s flow before shared election without poisoning the cache key', async kind => {
     let flow = await newFlow();
     if (kind === 'forged') flow = randomUUID();
     if (kind === 'expired') await sql(`UPDATE public.initial_analysis_flows SET expires_at=clock_timestamp()-interval '1 second' WHERE id=${quote(flow)}`);
     if (kind === 'cross-user') state.user = { id: 'another' };
     if (kind === 'completed') await sql(`UPDATE public.initial_analysis_flows SET complete=true WHERE id=${quote(flow)}`);
+    if (kind === 'draining') await sql(`INSERT INTO public.initial_analysis_operations(flow_id,operation,complete)
+      VALUES (${quote(flow)},'highlights',true),(${quote(flow)},'questions',false)`);
     state.rpc.mockClear();
     const response = await transcript(request(flow));
     expect(response.status).toBe(409);
     expect((await response.json()).code).toBe('ANALYSIS_INTENT_REQUIRED');
     expect(calls('transcript_cache_acquire')).toHaveLength(0);
     expect(await count('transcript_cache')).toBe('0');
-    expect(await count('initial_analysis_operations')).toBe('0');
+    expect(await count('initial_analysis_operations')).toBe(kind === 'draining' ? '2' : '0');
     expect(state.direct).not.toHaveBeenCalled(); expect(state.paid).not.toHaveBeenCalled();
     expect(calls('reserve_transcript_spend')).toHaveLength(0);
   });

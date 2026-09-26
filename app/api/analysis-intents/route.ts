@@ -5,7 +5,7 @@ import { createInitialAnalysisFlow, initialAnalysisErrorResponse } from '@/lib/i
 async function handler(request: NextRequest) {
   try {
     const body = await request.json();
-    return await createInitialAnalysisFlow(body?.videoId);
+    return await createInitialAnalysisFlow(body?.videoId, request.signal);
   } catch (error) {
     const response = initialAnalysisErrorResponse(error);
     if (response) return response;

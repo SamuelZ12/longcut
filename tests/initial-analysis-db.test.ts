@@ -158,6 +158,67 @@ describe.skipIf(!local)('initial-analysis actual PostgreSQL admission and mocked
     expect((await transcript(request(id, { ...payload, url: 'https://youtu.be/other123456' }))).status).toBe(409);
     expect(state.paid).not.toHaveBeenCalled();
   });
+  it.each(['questions-first', 'highlights-first'])('drains claimed optional work and seals new claims (%s)', async order => {
+    const id = await rawFlow('free', ['user:one']);
+    expect(await claim(id, ['user:one'], 'questions')).toBe('t');
+    expect(await claim(id, ['user:one'], 'highlights')).toBe('t');
+    const close = (op: string) => sql(`SET ROLE service_role; SELECT public.finish_initial_analysis_operation('${id}','${op}')`);
+    if (order === 'questions-first') {
+      const attempt = await reserve(id, 'questions'); expect(attempt.allowed).toBe(true);
+      await finish(attempt.reservation_id); expect(await close('questions')).toBe('t');
+      expect(await sql(`SELECT complete FROM public.initial_analysis_flows WHERE id='${id}'`)).toBe('f');
+      expect(await close('highlights')).toBe('t');
+    } else {
+      expect(await close('highlights')).toBe('t');
+      expect(await sql(`SELECT complete FROM public.initial_analysis_flows WHERE id='${id}'`)).toBe('f');
+      expect(await claim(id, ['user:one'], 'summary')).toBe('f');
+      expect(await claim(id, ['user:one'], 'questions')).toBe('f');
+      const attempt = await reserve(id, 'questions'); expect(attempt.allowed).toBe(true);
+      await finish(attempt.reservation_id);
+      expect((await reserve(id, 'questions')).reason).toBe('operation');
+      expect(await close('questions')).toBe('t');
+    }
+    expect(await sql(`SELECT complete FROM public.initial_analysis_flows WHERE id='${id}'`)).toBe('t');
+    expect(await claim(id, ['user:one'], 'summary')).toBe('f');
+    expect((await reserve(id, 'questions')).allowed).toBe(false);
+    expect(await sql(`SELECT count(*) FROM public.initial_ai_attempts WHERE flow_id='${id}'`)).toBe('1');
+  });
+  it('renewing expired intent preserves rolling AI usage and denial', async () => {
+    const ids = ['user:one'];
+    const old = await rawFlow('guest', ids);
+    await sql(`UPDATE public.initial_analysis_flows SET expires_at=clock_timestamp()-interval '1 second' WHERE id='${old}';
+      INSERT INTO public.initial_ai_attempts(flow_id,operation,identifiers,request_key,counted_at,state,lease_until,blocked_until)
+      SELECT '${old}','highlights',ARRAY['user:one'],'${videoId}:highlights',clock_timestamp(),'complete',clock_timestamp(),clock_timestamp() FROM generate_series(1,12)`);
+    expect(await claim(old, ids)).toBe('f');
+    const renewed = await rawFlow('guest', ids);
+    expect(await claim(renewed, ids)).toBe('t');
+    expect((await reserve(renewed)).reason).toBe('budget');
+    expect(await sql('SELECT count(*) FROM public.initial_ai_attempts')).toBe('12');
+  });
+  it.each([false, true])('primary route completes while admitted questions drain (guest=%s)', async guest => {
+    if (guest) state.user = null;
+    const id = await newFlow();
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    const entered = vi.fn();
+    const optional = withInitialAnalysis('questions', async () => {
+      entered(); await waiting;
+      await initialAIAttempt(async () => { state.paid('optional-questions'); });
+      return NextResponse.json({ questions: ['Why?'] });
+    });
+    const pending = optional(request(id));
+    await vi.waitFor(() => expect(entered).toHaveBeenCalled(), { timeout: 5000 });
+    try {
+      expect((await analysis(request(id))).status).toBe(200);
+      expect(state.paid).not.toHaveBeenCalledWith('optional-questions');
+      expect(state.used).toBe(guest);
+      expect(await sql(`SELECT complete FROM public.initial_analysis_flows WHERE id='${id}'`)).toBe('f');
+      expect([401, 409]).toContain((await preview(request(id))).status);
+    } finally { release(); }
+    expect((await pending).status).toBe(200);
+    expect(await sql(`SELECT complete FROM public.initial_analysis_flows WHERE id='${id}'`)).toBe('t');
+    expect(await sql('SELECT count(*) FROM public.initial_ai_attempts')).toBe('3');
+  });
   it.each(['create_initial_analysis_flow', 'claim_initial_analysis_operation', 'reserve_initial_ai_attempt'])('storage failure %s dispatches nothing', async name => {
     const id = name === 'create_initial_analysis_flow' ? undefined : await newFlow();
     state.failRpc = name;

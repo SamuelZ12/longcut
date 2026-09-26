@@ -42,7 +42,7 @@ import { AuthModal } from "@/components/auth-modal";
 import { TranscriptExportDialog } from "@/components/transcript-export-dialog";
 import { TranscriptExportUpsell } from "@/components/transcript-export-upsell";
 import { useAuth } from "@/contexts/auth-context";
-import { backgroundOperation, AbortManager } from "@/lib/promise-utils";
+import { backgroundOperation, AbortManager, awaitWithSignal } from "@/lib/promise-utils";
 import { csrfFetch } from "@/lib/csrf-client";
 import { toast } from "sonner";
 import { hasSpeakerMetadata } from "@/lib/transcript-export";
@@ -262,12 +262,14 @@ export default function AnalyzePage() {
     }
     return paidFetch(input, { ...init, headers });
   }, [paidFetch]);
-  const persistAnalysisUpdate = useCallback(async (body: Record<string, unknown>) => {
+  const persistAnalysisUpdate = useCallback(async (body: Record<string, unknown>, signal?: AbortSignal) => {
     try {
-      const response = await csrfFetch.post('/api/update-video-analysis', body);
+      signal?.throwIfAborted();
+      const response = await awaitWithSignal(csrfFetch.post('/api/update-video-analysis', body, { signal }), signal);
       if (response.status >= 500) throw new DependencyUnavailableError('analysis-update');
       return response;
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error;
       stopPaidWork();
       throw new DependencyUnavailableError('analysis-update');
     }
@@ -1294,15 +1296,16 @@ export default function AnalyzePage() {
   const generateSuggestedQuestionsForTopics = useCallback(async (
     generatedTopics: Topic[],
     sourceTranscript: TranscriptSegment[],
-    sourceVideoInfo: VideoInfo | null,
-    signal: AbortSignal
+    sourceVideoInfo: VideoInfo | null
   ) => {
     if (!videoId) return;
+    const requestKey = 'suggested-questions';
+    const { signal } = abortManager.current.createController(requestKey, 60000);
 
     await backgroundOperation(
       'generate-questions',
       async () => {
-        const res = await initialPaidFetch("/api/suggested-questions", {
+        const res = await awaitWithSignal(initialPaidFetch("/api/suggested-questions", {
           method: "POST",
           signal,
           headers: { "Content-Type": "application/json" },
@@ -1312,7 +1315,8 @@ export default function AnalyzePage() {
             videoTitle: sourceVideoInfo?.title,
             language: sourceVideoInfo?.language
           }),
-        });
+        }), signal);
+        signal.throwIfAborted();
 
         const applyCachedQuestions = (questions: string[]) => {
           if (questions.length === 0) {
@@ -1334,8 +1338,9 @@ export default function AnalyzePage() {
 
         let parsed: unknown;
         try {
-          parsed = await res.json();
+          parsed = await awaitWithSignal(res.json(), signal);
         } catch (error) {
+          signal.throwIfAborted();
           console.error("Failed to parse suggested questions payload:", error);
           return applyCachedQuestions(buildSuggestedQuestionFallbacks(3));
         }
@@ -1353,27 +1358,33 @@ export default function AnalyzePage() {
 
         applyCachedQuestions(normalizedQuestions);
 
-        await backgroundOperation(
+        const persistenceKey = 'persist-suggested-questions';
+        const persistence = abortManager.current.createController(persistenceKey, 10000);
+        void backgroundOperation(
           'update-questions',
           async () => {
             const updateRes = await persistAnalysisUpdate({
               videoId,
               suggestedQuestions: normalizedQuestions
-            });
+            }, persistence.signal);
             if (updateRes.status === 503) stopPaidWork();
 
             if (!updateRes.ok && updateRes.status !== 404 && updateRes.status !== 401 && updateRes.status !== 403) {
               throw new Error('Failed to update suggested questions');
             }
           }
-        );
+        ).finally(() => {
+          if (abortManager.current.getSignal(persistenceKey) === persistence.signal) abortManager.current.cleanup(persistenceKey);
+        });
 
         return normalizedQuestions;
       },
       (error) => {
         console.error("Failed to generate suggested questions:", error);
       }
-    );
+    ).finally(() => {
+      if (abortManager.current.getSignal(requestKey) === signal) abortManager.current.cleanup(requestKey);
+    });
   }, [videoId, initialPaidFetch, stopPaidWork, persistAnalysisUpdate]);
 
   const confirmShareReady = useCallback((url: string) => {
@@ -1433,14 +1444,15 @@ export default function AnalyzePage() {
     setIsRateLimitError(false);
 
     try {
+      const reusedFlow = analysisFlow.current?.videoId === videoId;
       if (!analysisFlow.current || analysisFlow.current.videoId !== videoId) {
         analysisFlow.current = { id: await requestAnalysisIntent(videoId, controller.signal), videoId };
       }
       controller.signal.throwIfAborted();
-      // Optional questions precede the final highlight/credit operation, which closes this flow.
-      await generateSuggestedQuestionsForTopics([], transcript, videoInfo, controller.signal);
-      controller.signal.throwIfAborted();
-      const response = await initialPaidFetch("/api/video-analysis", {
+      // Independent optional work; server seals admission at highlight completion
+      // and drains already claimed operations before closing the capability.
+      void generateSuggestedQuestionsForTopics([], transcript, videoInfo);
+      const generateHighlights = () => initialPaidFetch("/api/video-analysis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1453,6 +1465,18 @@ export default function AnalyzePage() {
         }),
         signal: controller.signal,
       });
+      let response = await generateHighlights();
+      if (reusedFlow && response.status === 409) {
+        const denial = await response.clone().json().catch(() => null);
+        if (denial?.code === 'ANALYSIS_INTENT_REQUIRED') {
+          // A delayed deliberate click may carry an expired capability. Renew once
+          // only after server denial, never on mount or on a spend-budget denial.
+          controller.signal.throwIfAborted();
+          analysisFlow.current = { id: await requestAnalysisIntent(videoId, controller.signal), videoId };
+          controller.signal.throwIfAborted();
+          response = await generateHighlights();
+        }
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: "Unknown error" }));

@@ -12,7 +12,7 @@ import { AbortManager, awaitWithSignal } from '@/lib/promise-utils';
 
 type Operation = 'transcript' | 'summary' | 'preview' | 'questions' | 'highlights' | 'themes';
 type Identity = Extract<Awaited<ReturnType<typeof transcriptEligibility>>, { allowed: true }>;
-type Flow = { id: string; videoId: string; identity: Identity };
+type Flow = { id: string; videoId: string; identity: Identity; signal?: AbortSignal };
 const flowContext = new AsyncLocalStorage<Flow>();
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -23,10 +23,11 @@ class IntentError extends Error {
 async function rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
   const manager = new AbortManager();
   try {
-    const combined = signal ? AbortSignal.any([signal, manager.createController('rpc', 5000).signal]) : undefined;
-    combined?.throwIfAborted();
+    const deadline = manager.createController('rpc', 5000).signal;
+    const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
+    combined.throwIfAborted();
     const query = createServiceRoleClient().rpc(name, args);
-    const { data, error } = combined ? await awaitWithSignal(query.abortSignal(combined), combined) : await query;
+    const { data, error } = await awaitWithSignal(query.abortSignal(combined), combined);
     if (error) throw error;
     return data;
   } catch (error) { throw dependencyUnavailable('initial-analysis-spend', error); }
@@ -52,12 +53,12 @@ async function eligible(): Promise<Identity> {
   return identity;
 }
 
-export async function createInitialAnalysisFlow(videoId: unknown): Promise<NextResponse> {
+export async function createInitialAnalysisFlow(videoId: unknown, signal?: AbortSignal): Promise<NextResponse> {
   if (typeof videoId !== 'string' || !/^[\w-]{11}$/.test(videoId)) {
     throw new IntentError(400, 'INVALID_VIDEO', 'A valid video ID is required.');
   }
   const identity = await eligible();
-  const flowId = await rpc('create_initial_analysis_flow', { p_video: videoId, p_tier: identity.tier, p_identifiers: identity.identifiers });
+  const flowId = await rpc('create_initial_analysis_flow', { p_video: videoId, p_tier: identity.tier, p_identifiers: identity.identifiers }, signal);
   if (flowId === null) throw new IntentError(401, 'ANALYSIS_ELIGIBILITY_REQUIRED', 'Sign in to analyze this video.');
   if (typeof flowId !== 'string' || !uuid.test(flowId)) throw dependencyUnavailable('initial-analysis-response');
   const response = NextResponse.json({ flowId, videoId }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
@@ -67,7 +68,7 @@ export async function createInitialAnalysisFlow(videoId: unknown): Promise<NextR
 
 async function operation<T>(flow: Flow, name: Operation, work: () => Promise<T>): Promise<T> {
   if (await rpc('claim_initial_analysis_operation', { p_flow: flow.id, p_video: flow.videoId,
-    p_identifiers: flow.identity.identifiers, p_operation: name, p_tier: flow.identity.tier }) !== true) {
+    p_identifiers: flow.identity.identifiers, p_operation: name, p_tier: flow.identity.tier }, flow.signal) !== true) {
     throw new IntentError(409, 'ANALYSIS_INTENT_REQUIRED', 'This analysis request expired or was already used. Start a new analysis.');
   }
   let admissionFailure: unknown;
@@ -83,7 +84,7 @@ async function operation<T>(flow: Flow, name: Operation, work: () => Promise<T>)
     try {
       // A swallowed budget/storage error must never permit a later fallback dispatch.
       if (admissionFailure) throw admissionFailure;
-      const result = await rpc('reserve_initial_ai_attempt', { p_flow: flow.id, p_operation: name }) as Record<string, unknown> | null;
+      const result = await rpc('reserve_initial_ai_attempt', { p_flow: flow.id, p_operation: name }, flow.signal) as Record<string, unknown> | null;
       if (result?.allowed === false) {
         if (!['flow', 'operation', 'budget', 'concurrency', 'cooldown'].includes(String(result.reason))) {
           throw dependencyUnavailable('initial-analysis-response');
@@ -98,8 +99,12 @@ async function operation<T>(flow: Flow, name: Operation, work: () => Promise<T>)
     } catch (error) { admissionFailure = error; throw error; }
     finally { releaseAdmission(); }
     let result: R;
-    try { result = await dispatch(); }
+    try {
+      flow.signal?.throwIfAborted();
+      result = await dispatch();
+    }
     catch (error) {
+      // Finalization has its own RPC deadline, independent of caller cancellation.
       // Known HTTP rejection has an explicit status. Network/timeout/unknown acceptance is quarantined.
       const status = (error as { status?: unknown } | null)?.status;
       const uncertain = typeof status !== 'number' || status < 400 || status >= 500 || status === 408;
@@ -118,6 +123,7 @@ async function operation<T>(flow: Flow, name: Operation, work: () => Promise<T>)
     return result;
   };
   try {
+    flow.signal?.throwIfAborted();
     const result = await flowContext.run(flow, () => initialAIContext.run({ attempt,
       assertHealthy: () => { if (admissionFailure) throw admissionFailure; } }, work));
     if (admissionFailure) throw admissionFailure;
@@ -173,7 +179,7 @@ export function withInitialAnalysis(name: Exclude<Operation, 'themes'>,
         p_video: videoId, p_identifiers: identity.identifiers }, request.signal) !== true) {
         throw new IntentError(409, 'ANALYSIS_INTENT_REQUIRED', 'This analysis request expired or was already used. Start a new analysis.');
       }
-      const fresh = (signal?: AbortSignal) => operation({ id: flowId, videoId, identity }, name,
+      const fresh = (signal?: AbortSignal) => operation({ id: flowId, videoId, identity, signal: signal ?? request.signal }, name,
         () => handler(signal ? new NextRequest(request, { signal }) : request));
       return options.reuse ? await options.reuse(request, fresh) : await fresh();
     } catch (error) {
