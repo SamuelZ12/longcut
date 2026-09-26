@@ -340,20 +340,6 @@ export function TranscriptViewer({
     }
   }, [handleUserScroll]);
 
-  const getSegmentTopic = (segment: TranscriptSegment): { topic: Topic; index: number } | null => {
-    for (let i = 0; i < topics.length; i++) {
-      const topic = topics[i];
-      const hasSegment = topic.segments.some(
-        (topicSeg) => segment.start >= topicSeg.start && segment.start < topicSeg.end
-      );
-      if (hasSegment) {
-        return { topic, index: i };
-      }
-    }
-    return null;
-  };
-
-
   const getHighlightedText = (segment: TranscriptSegment, segmentIndex: number): { highlightedParts: Array<{ text: string; highlighted: boolean; isCitation?: boolean; isSearchMatch?: boolean; isCurrentSearchMatch?: boolean }> } | null => {
     // Priority: Search > Citation/Topic
 
@@ -826,7 +812,6 @@ export function TranscriptViewer({
                 return transcript.map((segment, index) => {
                   const highlightedText = getHighlightedText(segment, index);
                   const isCurrent = index === currentSegmentIndex;
-                  getSegmentTopic(segment);
 
                   const hasHighlight = highlightedText !== null;
                   const translation = translationsCache.get(index);
