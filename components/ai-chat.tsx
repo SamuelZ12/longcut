@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, RefObject, Fragment, useMemo } from "react";
 import { z } from "zod";
+import { chatFollowUpQuestionsSchema } from '@/lib/schemas';
 import { requestAnalysisIntent } from '@/lib/initial-analysis-client';
 import { AbortManager } from '@/lib/promise-utils';
 import { ChatMessage, TranscriptSegment, Topic, Citation, NoteSource, NoteMetadata, VideoInfo, TranslationRequestHandler } from "@/lib/types";
@@ -92,6 +93,7 @@ const citationSchema = z.object({
 const chatApiResponseSchema = z.object({
   content: z.string().min(1, "Empty response received"),
   citations: z.array(citationSchema).optional(),
+  followUpQuestions: chatFollowUpQuestionsSchema,
 });
 
 const summaryResponseSchema = z.union([
@@ -411,7 +413,9 @@ export function AIChat({
     }
   }, [transcript, cachedSuggestedQuestions, suggestedQuestions.length, applyFallbackSuggestedQuestions]);
 
-  const requestFollowUpQuestions = useCallback(async (lastQuestion?: string) => {
+  // Chat supplies validated enrichment from its existing response. Other presets
+  // use local questions; they do not authorize standalone question generation.
+  const resolveFollowUpQuestions = useCallback((lastQuestion?: string, generated?: string[]) => {
     const excludeAccumulator = new Set<string>();
     const addToExclude = (question: string | undefined | null) => {
       if (!question) {
@@ -432,55 +436,14 @@ export function AIChat({
     const buildFallbackFollowUps = (existing: string[] = []) =>
       buildSuggestedQuestionFallbacks(2, excludeList, existing);
 
-    if (transcript.length === 0) {
-      return buildFallbackFollowUps();
+    const excluded = new Set(excludeList.map(question => question.toLowerCase()));
+    const merged = (generated ?? []).filter(question => !excluded.has(question.toLowerCase()));
+    for (const candidate of buildFallbackFollowUps(merged)) {
+      if (merged.length >= 2) break;
+      if (!merged.some(existing => existing.toLowerCase() === candidate.toLowerCase())) merged.push(candidate);
     }
-
-    try {
-      const response = await paidFetch("/api/suggested-questions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          transcript,
-          topics: sanitizedTopicsForChat,
-          videoTitle,
-          count: 2,
-          lastQuestion,
-          exclude: excludeList,
-          ...(selectedLanguage && { targetLanguage: selectedLanguage }),
-        }),
-      });
-
-      if (!response.ok) {
-        return buildFallbackFollowUps();
-      }
-
-      const data = await response.json();
-      const nextQuestions = Array.isArray(data.questions)
-        ? data.questions
-            .filter((q: unknown): q is string => typeof q === "string" && q.trim().length > 0)
-            .map((q: string) => q.trim())
-        : [];
-
-      if (nextQuestions.length >= 2) {
-        return nextQuestions.slice(0, 2);
-      }
-
-      const merged = [...nextQuestions];
-      const fallback = buildFallbackFollowUps(merged);
-      for (const candidate of fallback) {
-        if (merged.length >= 2) {
-          break;
-        }
-        if (!merged.some(existing => existing.toLowerCase() === candidate.toLowerCase())) {
-          merged.push(candidate);
-        }
-      }
-      return merged.slice(0, 2);
-    } catch {
-      return buildFallbackFollowUps();
-    }
-  }, [transcript, sanitizedTopicsForChat, videoTitle, suggestedQuestions, selectedLanguage, paidFetch]);
+    return merged.slice(0, 2);
+  }, [suggestedQuestions]);
 
   const sendMessage = useCallback(async (messageInput?: SuggestedMessage, retryCount = 0) => {
     const isObjectInput = typeof messageInput === "object" && messageInput !== null;
@@ -509,19 +472,7 @@ export function AIChat({
     let followUpPromise: Promise<{ id: number; questions: string[]; error: boolean }> | null = null;
     let assistantMessageId: string | null = null;
 
-    if (transcript.length > 0) {
-      const requestId = followUpRequestIdRef.current + 1;
-      followUpRequestIdRef.current = requestId;
-      setLoadingFollowUps(true);
-      followUpPromise = (async () => {
-        try {
-          const questions = await requestFollowUpQuestions(promptText);
-          return { id: requestId, questions, error: false as const };
-        } catch {
-          return { id: requestId, questions: [] as string[], error: true as const };
-        }
-      })();
-    }
+    const requestId = ++followUpRequestIdRef.current;
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -626,6 +577,11 @@ export function AIChat({
       }
 
       const parsedData = chatApiResponseSchema.parse(rawData);
+      followUpPromise = Promise.resolve({
+        id: requestId,
+        questions: resolveFollowUpQuestions(promptText, parsedData.followUpQuestions),
+        error: false,
+      });
       const normalizedContent = normalizeBracketTimestamps(parsedData.content);
 
       const assistantMessage: ChatMessage = {
@@ -696,7 +652,7 @@ export function AIChat({
         }
       }
     }
-  }, [input, isLoading, messages, transcript, sanitizedTopicsForChat, videoId, requestFollowUpQuestions, selectedLanguage, paidFetch]);
+  }, [input, isLoading, messages, transcript, sanitizedTopicsForChat, videoId, resolveFollowUpQuestions, selectedLanguage, paidFetch]);
 
   const executeKeyTakeaways = useCallback(
     async ({ skipUserMessage = false }: { skipUserMessage?: boolean } = {}) => {
@@ -741,7 +697,7 @@ export function AIChat({
         setLoadingFollowUps(true);
         followUpPromise = (async () => {
           try {
-            const questions = await requestFollowUpQuestions(KEY_TAKEAWAYS_LABEL);
+            const questions = resolveFollowUpQuestions(KEY_TAKEAWAYS_LABEL);
             return { id: requestId, questions, error: false as const };
           } catch {
             return { id: requestId, questions: [] as string[], error: true as const };
@@ -830,7 +786,7 @@ export function AIChat({
         }
       }
     },
-    [askedQuestions, isLoading, transcript, videoInfo, videoId, videoTitle, requestFollowUpQuestions, selectedLanguage, translatedKeyTakeawaysLabel, paidFetch]
+    [askedQuestions, isLoading, transcript, videoInfo, videoId, videoTitle, resolveFollowUpQuestions, selectedLanguage, translatedKeyTakeawaysLabel, paidFetch]
   );
 
   const executeTopQuotes = useCallback(
@@ -876,7 +832,7 @@ export function AIChat({
         setLoadingFollowUps(true);
         followUpPromise = (async () => {
           try {
-            const questions = await requestFollowUpQuestions(TOP_QUOTES_LABEL);
+            const questions = resolveFollowUpQuestions(TOP_QUOTES_LABEL);
             return { id: requestId, questions, error: false as const };
           } catch {
             return { id: requestId, questions: [] as string[], error: true as const };
@@ -960,7 +916,7 @@ export function AIChat({
         }
       }
     },
-    [askedQuestions, isLoading, transcript, videoInfo, videoTitle, requestFollowUpQuestions, selectedLanguage, translatedTopQuotesLabel, paidFetch]
+    [askedQuestions, isLoading, transcript, videoInfo, videoTitle, resolveFollowUpQuestions, selectedLanguage, translatedTopQuotesLabel, paidFetch]
   );
 
   const handleAskKeyTakeaways = useCallback(() => {

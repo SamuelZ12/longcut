@@ -121,7 +121,7 @@ async function handler(request: NextRequest) {
     const languageInstruction = targetLanguage
       ? (() => {
           const langName = getLanguageName(targetLanguage);
-          return `\n<languageRequirement>IMPORTANT: You MUST respond in ${langName}. All text in the "answer" field must be in ${langName}.</languageRequirement>\n`;
+          return `\n<languageRequirement>IMPORTANT: You MUST respond in ${langName}. All text in the "answer" and "followUpQuestions" fields must be in ${langName}.</languageRequirement>\n`;
         })()
       : '';
 
@@ -151,13 +151,17 @@ ${chatHistoryContext || 'No prior conversation'}
     <item>Respond in concise, complete sentences that mirror the transcript's language when applicable.</item>
     <item>If the transcript lacks the requested information or was unnecessary, state that clearly and return an empty timestamps array.</item>
   </step>
+  <step name="FollowUpQuestions">
+    <item>Include two distinct, concise follow-up questions the user could ask next, relevant to this answer and conversation. Avoid repeating questions already asked. Each question must be at most 300 characters.</item>
+    <item>Questions are optional enrichment: prioritize completing the answer and its citations, then include followUpQuestions last.</item>
+  </step>
 </instructions>
 <validationChecklist>
   <item>If you cited the transcript, does every factual statement have a supporting timestamp in brackets?</item>
   <item>Are all timestamps valid moments within the transcript?</item>
   <item>If the transcript was unnecessary or lacked the answer, did you state that and keep the timestamps array empty?</item>
 </validationChecklist>
-<outputFormat>Return strict JSON object: {"answer":"string","timestamps":["MM:SS"]}. No extra commentary.</outputFormat>
+<outputFormat>Return strict JSON object: {"answer":"string","timestamps":["MM:SS"],"followUpQuestions":["First question?","Second question?"]}. No extra commentary.</outputFormat>
 <transcript><![CDATA[
 ${transcriptContext}
 ]]></transcript>
@@ -173,7 +177,7 @@ ${message}
     try {
       response = await generateAIResponse(prompt, {
         temperature: 0.6,
-        maxOutputTokens: Math.min(1024, maxOutputTokens),
+        maxOutputTokens: Math.min(1280, maxOutputTokens),
         zodSchema: chatResponseSchema
       });
 
@@ -370,6 +374,7 @@ ${message}
     return NextResponse.json({ 
       content: processedAnswer,
       citations,
+      ...(parsedResponse.followUpQuestions && { followUpQuestions: parsedResponse.followUpQuestions }),
     });
   } catch {
     return NextResponse.json(

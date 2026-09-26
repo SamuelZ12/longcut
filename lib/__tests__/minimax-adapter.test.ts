@@ -3,6 +3,31 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 
 import { createMiniMaxAdapter } from '../ai-providers/minimax-adapter';
+import { chatResponseSchema } from '../schemas';
+
+test('chat optional enrichment survives MiniMax normalization without validation-induced retry', async () => {
+  await withEnv({ MINIMAX_API_KEY: 'test-key' }, async () => {
+    for (const followUpQuestions of [undefined, null, ['Only one?'], ['Good?', 42],
+      ['Same?', ' same? '], ['A?', 'B?']]) {
+      let calls = 0;
+      await withMockFetch(async (_input, init) => {
+        calls++;
+        const body = JSON.parse(String(init?.body));
+        assert.match(body.messages[0].content, /followUpQuestions/);
+        return Response.json({ choices: [{ message: { content: JSON.stringify({
+          answer: 'Answer [00:00].', timestamps: ['00:00'], followUpQuestions,
+        }) } }] });
+      }, async () => {
+        const result = await createMiniMaxAdapter().generate({ prompt: 'Answer and suggest two questions', zodSchema: chatResponseSchema });
+        const data = JSON.parse(result.content);
+        assert.equal(data.answer, 'Answer [00:00].');
+        assert.deepEqual(data.timestamps, ['00:00']);
+        assert.deepEqual(data.followUpQuestions, followUpQuestions?.[0] === 'A?' ? ['A?', 'B?'] : undefined);
+        assert.equal(calls, 1);
+      });
+    }
+  });
+});
 
 function withEnv<T>(values: Record<string, string | undefined>, run: () => Promise<T>) {
   const originalValues = new Map<string, string | undefined>();

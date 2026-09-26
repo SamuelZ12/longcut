@@ -145,6 +145,80 @@ describe('cache and public-page classification', () => {
 });
 
 describe('paid admission', () => {
+  it.each(['minimax', 'grok', 'gemini'])('chat uses one mocked network dispatch through the real %s adapter/registry for optional enrichment', async provider => {
+    const actual = await vi.importActual<typeof import('@/lib/ai-client')>('@/lib/ai-client');
+    vi.stubEnv('AI_PROVIDER', provider);
+    vi.stubEnv('MINIMAX_API_KEY', 'local-mock-key');
+    vi.stubEnv('XAI_API_KEY', 'local-mock-key');
+    vi.stubEnv('GEMINI_API_KEY', 'local-mock-key');
+    try {
+      for (const followUpQuestions of [undefined, { error: '503 timeout' }, ['One?', 42], ['A?', 'B?']]) {
+        const content = JSON.stringify({ answer: 'A useful insight [00:00].', timestamps: ['00:00'], followUpQuestions });
+        const network = vi.fn(async () => Response.json(provider === 'gemini'
+          ? { candidates: [{ content: { role: 'model', parts: [{ text: content }] }, finishReason: 'STOP', index: 0 }] }
+          : { choices: [{ message: { content } }] }));
+        vi.stubGlobal('fetch', network);
+        state.text.mockImplementation(actual.generateAIResponse);
+        const response = await chat(request('chat', { ...payload, message: 'Explain this insight' } as any));
+        const data = await response.json();
+        expect(data.content).toBe('A useful insight [00:00].');
+        expect(data.citations).toHaveLength(1);
+        expect(data.followUpQuestions).toEqual(Array.isArray(followUpQuestions) && followUpQuestions[0] === 'A?' ? ['A?', 'B?'] : undefined);
+        expect(network).toHaveBeenCalledTimes(1);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('recovers an answer from a truncated question tail without another generation', async () => {
+    state.text.mockResolvedValue('{"answer":"A useful insight [00:00].","timestamps":["00:00"],"followUpQuestions":["Unfinished');
+    const response = await chat(request('chat', { ...payload, message: 'Explain this insight' } as any));
+    expect(await response.json()).toMatchObject({ content: 'A useful insight [00:00].', citations: [{ number: 1 }] });
+    expect(state.text).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects chat-shaped forged standalone questions without an initial flow', async () => {
+    const response = await questions(new NextRequest('http://localhost/api/suggested-questions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, lastQuestion: 'Explain this?', count: 2,
+        chatHistory: [{ role: 'assistant', content: 'A completed chat answer' }],
+        followUpQuestions: ['Next?', 'Why?'] }),
+    }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'ANALYSIS_INTENT_REQUIRED' });
+    noPaidCalls();
+  });
+
+  it.each([
+    undefined, null, 'not an array', ['Only one?'], ['Valid?', 42], ['', 'Why?'],
+    ['Same?', ' same? '], ['x'.repeat(301), 'Why?'], ['A?', 'B?', 'C?'],
+    { questions: ['A?', 'B?'] },
+  ].map(followUpQuestions => ({ followUpQuestions })))('chat preserves answer/citations and makes one call for invalid optional questions $followUpQuestions', async ({ followUpQuestions }) => {
+    state.text.mockResolvedValue(JSON.stringify({ answer: 'A useful insight [00:00].', timestamps: ['00:00'], followUpQuestions }));
+    const response = await chat(request('chat', { ...payload, message: 'Explain this insight' } as any));
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.content).toBe('A useful insight [00:00].');
+    expect(data.citations).toHaveLength(1);
+    expect(data.followUpQuestions).toBeUndefined();
+    expect(state.text).toHaveBeenCalledTimes(1);
+    expect(state.upstream).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('chat returns generated questions with existing citations (fenced=%s)', async fenced => {
+    const json = JSON.stringify({ answer: 'A useful insight [00:00].', timestamps: ['00:00'],
+      followUpQuestions: [' How can I apply this? ', 'What are the limitations?'] });
+    state.text.mockResolvedValue(fenced ? `\`\`\`json\n${json}\n\`\`\`` : json);
+    const response = await chat(request('chat', { ...payload, message: 'Explain this insight' } as any));
+    expect(await response.json()).toMatchObject({ content: 'A useful insight [00:00].',
+      citations: [{ number: 1, text: 'A useful insight.', start: 0, end: 10 }],
+      followUpQuestions: ['How can I apply this?', 'What are the limitations?'] });
+    expect(state.text).toHaveBeenCalledTimes(1);
+    expect(state.text.mock.calls[0][1].maxOutputTokens).toBe(1280);
+    expect(state.text.mock.calls[0][1].provider).toBeUndefined();
+  });
+
   const routes = { transcript, analysis, summary, topics, preview, questions, quotes, chat, image, enhance, translate };
   for (const [name, route] of Object.entries(routes)) {
     const failures = name === 'enhance' ? ['cacheError', 'limiterError', 'usageError'] as const : ['cacheError', 'limiterError', 'guestError'] as const;

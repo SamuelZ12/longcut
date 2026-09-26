@@ -34,7 +34,7 @@ beforeEach(() => {
     if (url === '/api/image-limit') return Response.json({ remaining: 1 });
     if (url === '/api/csrf-token') return Response.json({}, { headers: { 'X-CSRF-Token': 'mock-token' } });
     if (url === '/api/analysis-intents') return Response.json({ flowId: '00000000-0000-4000-8000-000000000001' }, { status: 201 });
-    // Mock server denial of unadmitted follow-up requests never invokes a provider.
+    // Any accidental standalone question request remains denied.
     if (url === '/api/suggested-questions') return Response.json({ error: 'Intent required' }, { status: 409 });
     paid(url); return Response.json({ summaryContent: 'Generated summary' });
   }));
@@ -58,6 +58,59 @@ it('explicit summary preset obtains server intent before its provider request', 
   expect(requests.indexOf('/api/analysis-intents')).toBeLessThan(requests.indexOf('/api/generate-summary'));
   const summary = vi.mocked(fetch).mock.calls.find(([url]) => url === '/api/generate-summary');
   expect(new Headers(summary?.[1]?.headers).get('x-analysis-flow')).toBe('00000000-0000-4000-8000-000000000001');
+  await screen.findByText('Generated summary');
+  expect(requests).not.toContain('/api/suggested-questions');
+  expect(paid).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  ['How can I apply this?', 'What are the limitations?'],
+  undefined, null, ['Only one?'], ['Valid?', 42], ['Same?', ' same? '],
+].map(followUpQuestions => ({ followUpQuestions })))('explicit chat consumes optional questions or falls back without another paid request ($followUpQuestions)', async ({ followUpQuestions }) => {
+  const paidFetch = vi.fn(async () => Response.json({ content: 'An explicit chat answer.', citations: [], followUpQuestions }));
+  render(<AIChat transcript={segments} topics={[]} videoId="abcdefghijk" paidFetch={paidFetch}
+    onCitationClick={() => {}} onTimestampClick={() => {}} />);
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Explain the insight' } });
+  fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', code: 'Enter' });
+  await screen.findByText('An explicit chat answer.');
+  await waitFor(() => {
+    if (Array.isArray(followUpQuestions) && followUpQuestions[0] === 'How can I apply this?') {
+      expect(screen.getByRole('button', { name: 'How can I apply this?' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'What are the limitations?' })).toBeTruthy();
+    } else {
+      expect(screen.getByRole('button', { name: 'What example clarifies the takeaway?' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'How can I apply this idea today?' })).toBeTruthy();
+    }
+  });
+  expect(paidFetch).toHaveBeenCalledTimes(1);
+  expect(paidFetch.mock.calls[0]).toEqual(expect.arrayContaining(['/api/chat']));
+  expect(requests).not.toContain('/api/suggested-questions');
+});
+
+it('a generated follow-up click sends another explicit chat, not a standalone question request', async () => {
+  const paidFetch = vi.fn(async () => Response.json({ content: 'Chat answer.',
+    followUpQuestions: ['How can I apply this?', 'What are the limitations?'] }));
+  render(<AIChat transcript={segments} topics={[]} videoId="abcdefghijk" paidFetch={paidFetch}
+    onCitationClick={() => {}} onTimestampClick={() => {}} />);
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Explain the insight' } });
+  fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', code: 'Enter' });
+  fireEvent.click(await screen.findByRole('button', { name: 'How can I apply this?' }));
+  await waitFor(() => expect(paidFetch).toHaveBeenCalledTimes(2));
+  expect(paidFetch.mock.calls.every(call => (call as unknown[])[0] === '/api/chat')).toBe(true);
+  const second = (paidFetch.mock.calls[1] as unknown[])[1] as RequestInit;
+  expect(JSON.parse(String(second.body)).message).toBe('How can I apply this?');
+  expect(requests).not.toContain('/api/suggested-questions');
+});
+
+it('quotes preset uses local follow-ups and makes only its existing paid request', async () => {
+  const paidFetch = vi.fn(async () => Response.json({ quotesMarkdown: 'A memorable quote.' }));
+  render(<AIChat transcript={segments} topics={[]} videoId="abcdefghijk" paidFetch={paidFetch}
+    onCitationClick={() => {}} onTimestampClick={() => {}} />);
+  fireEvent.click(await screen.findByRole('button', { name: /What are the juciest quotes/ }));
+  await screen.findByText('A memorable quote.');
+  expect(paidFetch).toHaveBeenCalledTimes(1);
+  expect(paidFetch.mock.calls[0]).toEqual(expect.arrayContaining(['/api/top-quotes']));
+  expect(requests).not.toContain('/api/suggested-questions');
 });
 
 it('submission handoff is bound to video and consumed once; failed admission stores no handoff', async () => {

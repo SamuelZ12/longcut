@@ -19,9 +19,18 @@ export const topicGenerationSchema = z.array(
 
 export const suggestedQuestionsSchema = z.array(z.string());
 
+// Optional enrichment must never invalidate an otherwise usable chat answer,
+// including in adapters that validate structured output before returning it.
+export const chatFollowUpQuestionsSchema = z.array(z.string().trim().min(1).max(300))
+  .length(2)
+  .refine(questions => new Set(questions.map(question => question.toLowerCase())).size === 2)
+  .optional()
+  .catch(undefined);
+
 export const chatResponseSchema = z.object({
   answer: z.string().max(100000),
-  timestamps: z.array(z.string().regex(timestampPattern)).max(5).optional()
+  timestamps: z.array(z.string().regex(timestampPattern)).max(5).optional(),
+  followUpQuestions: chatFollowUpQuestionsSchema,
 });
 
 export const summaryTakeawaySchema = z.object({
