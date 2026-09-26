@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 // Keep this predecessor suite focused on the native ledger. The initial-analysis DB suite composes both ledgers.
 vi.mock('@/lib/initial-analysis-spend', () => ({ withInitialAnalysis: (_operation: unknown, handler: unknown) => handler }));
+vi.mock('@/lib/transcript-cache', () => ({ assertTranscriptCacheOwner: async () => {}, reuseTranscript: vi.fn() }));
 
 // Invoked by the disposable-cluster harness; never accepts a database URL or credentials.
 const state = vi.hoisted(() => ({ user: { id: 'one' } as { id: string } | null,
@@ -107,7 +108,13 @@ describe.skipIf(!localCluster)('actual transcript route + PostgreSQL spend RPCs 
   });
 
   it('pre-dispatch cancellation releases; missing configuration never reserves', async () => {
-    const controller = new AbortController(); controller.abort();
+    const controller = new AbortController();
+    const rpc = state.adminRpc.getMockImplementation()!;
+    state.adminRpc.mockImplementation(async (...args) => {
+      const result = await rpc(...args);
+      if (args[0] === 'reserve_transcript_spend') controller.abort();
+      return result;
+    });
     expect((await POST(new NextRequest(request(), { signal: controller.signal }))).status).toBe(503);
     expect(await sql("SELECT count(*) FROM public.transcript_spend_attempts WHERE state='released'")).toBe('1');
     vi.stubEnv('SUPADATA_SPEND_POLICY', '');

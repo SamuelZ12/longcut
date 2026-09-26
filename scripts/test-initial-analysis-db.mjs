@@ -21,7 +21,7 @@ try {
     CREATE FUNCTION public.cleanup_old_rate_limits() RETURNS void LANGUAGE sql AS $$ DELETE FROM public.rate_limits $$;
     ALTER FUNCTION public.cleanup_old_rate_limits() OWNER TO migration_executor;`, encoding: 'utf8' });
   const migrationArgs = ['exec', '-i', container, 'psql', '-U', 'migration_executor', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1'];
-  for (const name of ['20260923060000_server_only_limiter.sql', '20260925040000_transcript_vendor_spend.sql', '20260925050000_initial_analysis_spend.sql']) {
+  for (const name of ['20260923060000_server_only_limiter.sql', '20260925040000_transcript_vendor_spend.sql', '20260925050000_initial_analysis_spend.sql', '20260925060000_shared_transcript_cache.sql']) {
     execFileSync('docker', migrationArgs, { input: readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), 'utf8'), encoding: 'utf8' });
   }
   const result = spawnSync('npx', ['vitest', 'run', 'tests/initial-analysis-db.test.ts'], {

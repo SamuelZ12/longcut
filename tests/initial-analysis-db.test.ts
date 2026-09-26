@@ -26,13 +26,19 @@ async function sql(text: string): Promise<string> {
 const quote = (v: unknown) => `'${String(v).replaceAll("'", "''")}'`;
 const signatures: Record<string, string[]> = {
   create_initial_analysis_flow: ['p_video', 'p_tier', 'p_identifiers'],
+  validate_initial_analysis_flow: ['p_flow', 'p_video', 'p_identifiers'],
   claim_initial_analysis_operation: ['p_flow', 'p_video', 'p_identifiers', 'p_operation', 'p_tier'],
   finish_initial_analysis_operation: ['p_flow', 'p_operation'],
   reserve_initial_ai_attempt: ['p_flow', 'p_operation'], finish_initial_ai_attempt: ['p_id', 'p_uncertain'],
   reserve_transcript_spend: ['p_policy', 'p_tier', 'p_identifiers', 'p_key'], transition_transcript_spend: ['p_id', 'p_action'],
+  transcript_cache_acquire: ['p_key', 'p_refresh'], transcript_cache_read: ['p_key'],
+  transcript_cache_assert_owner: ['p_key', 'p_owner'], transcript_cache_finish: ['p_key', 'p_owner', 'p_payload', 'p_uncertain'],
 };
 vi.mock('@/lib/security-middleware', () => ({ withSecurity: (h: unknown) => h, SECURITY_PRESETS: { PAID: {} } }));
-vi.mock('@/lib/supabase/admin', () => ({ createServiceRoleClient: () => ({ rpc: state.rpc }) }));
+vi.mock('@/lib/supabase/admin', () => ({ createServiceRoleClient: () => ({ rpc: (...args: unknown[]) => {
+  const result = state.rpc(...args);
+  return Object.assign(result, { abortSignal: () => result });
+} }) }));
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({
   auth: { getUser: async () => ({ data: { user: state.user }, error: state.authError }) },
   from: (table: string) => {
@@ -92,7 +98,7 @@ const finish = (id: string, uncertain = false) => sql(`SET ROLE service_role; SE
 
 describe.skipIf(!local)('initial-analysis actual PostgreSQL admission and mocked upstream route counters', () => {
   beforeEach(async () => {
-    await sql('TRUNCATE public.initial_ai_attempts, public.initial_analysis_operations, public.initial_analysis_flows, public.transcript_spend_attempts, public.guest_analysis_usage CASCADE');
+    await sql('TRUNCATE public.transcript_cache, public.initial_ai_attempts, public.initial_analysis_operations, public.initial_analysis_flows, public.transcript_spend_attempts, public.guest_analysis_usage CASCADE');
     vi.clearAllMocks();
     Object.assign(state, { user: { id: 'one' }, eligible: true, tier: 'free', topup: 0, unlimited: false, used: false, cache: null,
       failRpc: '', authError: null, loseAck: false, cacheReads: 0, vanishCache: false });
@@ -100,7 +106,9 @@ describe.skipIf(!local)('initial-analysis actual PostgreSQL admission and mocked
     state.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
       if (name === state.failRpc) return { error: { code: 'LOCAL_FAILURE' }, data: null };
       if (!signatures[name]) throw new Error(`Unexpected RPC ${name}`);
-      const values = signatures[name].map(k => Array.isArray(args[k]) ? `ARRAY[${(args[k] as unknown[]).map(quote)}]::text[]` : quote(args[k]));
+      const values = signatures[name].map(k => args[k] === null ? 'NULL'
+        : k === 'p_payload' ? `${quote(JSON.stringify(args[k]))}::jsonb`
+        : Array.isArray(args[k]) ? `ARRAY[${(args[k] as unknown[]).map(quote)}]::text[]` : quote(args[k]));
       try {
         const out = await sql(`SET ROLE service_role; SELECT public.${name}(${values})`);
         if (name === 'reserve_initial_ai_attempt' && state.loseAck) return { error: { code: 'LOST_ACK' }, data: null };

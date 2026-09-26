@@ -38,7 +38,8 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({
   },
 }) }));
 vi.mock('@/lib/supabase/admin', () => ({ createServiceRoleClient: () => ({
-  rpc: async (name: string, args: any) => {
+  rpc: (name: string, args: any) => {
+    const result = (async () => {
     state.rpc(name, args);
     if (name === 'check_rate_limit_server') return {
       data: { allowed: state.limiterAllowed, remaining: 2, reset_at: new Date().toISOString(), retry_after: 60 },
@@ -47,8 +48,12 @@ vi.mock('@/lib/supabase/admin', () => ({ createServiceRoleClient: () => ({
     if (name === 'guest_usage_server') return { data: state.guestUsed || args.p_record, error: state.guestError };
     if (name === 'reserve_transcript_spend') return { data: { allowed: true, reservation_id: 'test-reservation' }, error: null };
     if (name === 'transition_transcript_spend') return { data: true, error: null };
+    if (name === 'validate_initial_analysis_flow' || name === 'transcript_cache_assert_owner' || name === 'transcript_cache_finish') return { data: true, error: null };
+    if (name === 'transcript_cache_acquire') return { data: { state: 'leader', owner: '00000000-0000-4000-8000-000000000002' }, error: null };
     if (name === 'claim_initial_analysis_operation' || name === 'finish_initial_analysis_operation') return { data: true, error: null };
     throw new Error(`Unexpected service RPC ${name}`);
+    })();
+    return Object.assign(result, { abortSignal: () => result });
   },
 }) }));
 vi.mock('@/lib/ai-processing', () => ({ generateTopicsFromTranscript: state.topics, generateThemesFromTranscript: state.themes }));

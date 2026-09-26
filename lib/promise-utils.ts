@@ -37,8 +37,26 @@ export async function backgroundOperation<T>(
 }
 
 /**
- * Creates a timeout-wrapped promise with AbortController support
+ * Stops waiting on cancellation, even when transport ignores its signal.
+ * Underlying work must also receive the signal to stop subsequent dispatches.
  */
+export function awaitWithSignal<T>(promise: PromiseLike<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return Promise.resolve(promise);
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => { signal.removeEventListener('abort', abort); reject(signal.reason); };
+    signal.addEventListener('abort', abort, { once: true });
+    Promise.resolve(promise).then(value => {
+      signal.removeEventListener('abort', abort);
+      resolve(value);
+    }, error => {
+      signal.removeEventListener('abort', abort);
+      reject(error);
+    });
+    if (signal.aborted) abort();
+  });
+}
+
+/** Creates a timeout-wrapped promise with AbortController support. */
 export function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,

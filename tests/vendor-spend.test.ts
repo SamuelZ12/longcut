@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 // Isolate ticket03 vendor accounting; ticket04's real intent boundary has its own DB suite.
 vi.mock('@/lib/initial-analysis-spend', () => ({ withInitialAnalysis: (_operation: unknown, handler: unknown) => handler }));
+vi.mock('@/lib/transcript-cache', () => ({ assertTranscriptCacheOwner: async () => {}, reuseTranscript: vi.fn() }));
 
 const state = vi.hoisted(() => ({
   user: { id: '00000000-0000-4000-8000-000000000001' } as any,
@@ -90,16 +91,22 @@ it('direct YouTube success remains free even when paid policy is disabled', asyn
   expect(state.upstream).not.toHaveBeenCalled();
 });
 
-it('preserves provider language casing while canonicalizing only spend identity', async () => {
+it('canonicalizes requested language consistently for acquisition and cache identity', async () => {
   state.direct.mockResolvedValue({ segments: [{ text: 'Hello.', start: 0, duration: 2 }] });
   expect((await POST(request('', { lang: 'en-US' }))).status).toBe(200);
-  expect(state.direct).toHaveBeenCalledWith('abcdefghijk', 'en-US', undefined);
+  expect(state.direct).toHaveBeenCalledWith('abcdefghijk', 'en-us', undefined, expect.any(AbortSignal));
   expect(state.upstream).not.toHaveBeenCalled();
 });
 
 it('releases only demonstrably pre-dispatch cancellation', async () => {
   state.reserve = { allowed: true, reservation_id: 'reservation' };
-  const controller = new AbortController(); controller.abort();
+  const controller = new AbortController();
+  const rpc = state.rpc.getMockImplementation()!;
+  state.rpc.mockImplementation(async (...args) => {
+    const result = await rpc(...args);
+    if (args[0] === 'reserve_transcript_spend') controller.abort();
+    return result;
+  });
   const req = new NextRequest(request(), { signal: controller.signal });
   expect((await POST(req)).status).toBe(503);
   expect(state.upstream).not.toHaveBeenCalled();

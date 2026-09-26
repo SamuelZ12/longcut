@@ -10,6 +10,7 @@ import { fetchSupadataTranscript } from '@/lib/supadata-transcript-provider';
 import { transcriptEligibility, reserveTranscriptSpend, transitionTranscriptSpend } from '@/lib/transcript-spend';
 import { setGuestCookies } from '@/lib/guest-usage';
 import { DependencyUnavailableError } from '@/lib/dependency-unavailable';
+import { assertTranscriptCacheOwner, reuseTranscript } from '@/lib/transcript-cache';
 
 function respondWithNoCredits(
   payload: Record<string, unknown>,
@@ -39,12 +40,13 @@ function calculateTranscriptDuration(segments: { start: number; duration: number
 async function handler(request: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
+    request.signal.throwIfAborted();
     const { url, lang: requestedLang, expectedDuration } = await request.json();
     if (typeof url !== 'string' || (requestedLang !== undefined &&
       (typeof requestedLang !== 'string' || !/^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*$/.test(requestedLang)))) {
       return respondWithNoCredits({ error: 'Invalid transcript request' }, 400, requestId);
     }
-    const lang: string | undefined = requestedLang;
+    const lang: string | undefined = requestedLang?.toLowerCase();
 
     if (!url) {
       return respondWithNoCredits({ error: 'YouTube URL is required' }, 400, requestId);
@@ -120,7 +122,7 @@ async function handler(request: NextRequest) {
     // ── Attempt 1: YouTube InnerTube API (free) ──
     console.log(`[TRANSCRIPT] Trying YouTube direct for ${videoId} (lang=${lang ?? 'auto'})`);
     try {
-      const ytResult = await fetchYouTubeTranscript(videoId, lang, expectedDuration);
+      const ytResult = await fetchYouTubeTranscript(videoId, lang, expectedDuration, request.signal);
       if (ytResult && ytResult.segments.length > 0) {
         rawSegments = ytResult.segments;
         language = ytResult.language;
@@ -129,6 +131,7 @@ async function handler(request: NextRequest) {
         console.log(`[TRANSCRIPT] YouTube direct succeeded: ${rawSegments.length} segments, lang=${language}`);
       }
     } catch (ytError) {
+      request.signal.throwIfAborted();
       console.warn(`[TRANSCRIPT] YouTube direct failed:`, ytError instanceof Error ? ytError.message : String(ytError));
     }
 
@@ -137,6 +140,7 @@ async function handler(request: NextRequest) {
       const supadataKey = process.env.SUPADATA_API_KEY;
       if (supadataKey) {
         source = 'supadata';
+        await assertTranscriptCacheOwner();
         const admission = await reserveTranscriptSpend(eligibility, videoId, lang);
         if (!admission.allowed) {
           if (admission.reason === 'guest_used') return respond({ code: 'TRANSCRIPT_ELIGIBILITY_REQUIRED',
@@ -153,6 +157,7 @@ async function handler(request: NextRequest) {
           return respond({ code: 'TRANSCRIPT_DEPENDENCY_FAILURE', error: 'Transcript request cancelled before dispatch.' }, 503);
         }
         // Commit possible dispatch BEFORE invoking the provider. No refund after this boundary.
+        await assertTranscriptCacheOwner(true);
         await transitionTranscriptSpend(admission.reservationId, 'dispatch');
         const result = await fetchSupadataTranscript({ videoId, lang, apiKey: supadataKey, requestId, signal: request.signal });
         await transitionTranscriptSpend(admission.reservationId,
@@ -250,6 +255,8 @@ async function handler(request: NextRequest) {
     return response;
   } catch (error) {
     if (error instanceof DependencyUnavailableError) throw error;
+    if (request.signal.aborted) return respondWithNoCredits({ code: 'TRANSCRIPT_DEPENDENCY_FAILURE',
+      error: 'Transcript request cancelled or timed out.' }, 503, requestId);
     console.error('[TRANSCRIPT] Error processing transcript:', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
@@ -259,4 +266,4 @@ async function handler(request: NextRequest) {
   }
 }
 
-export const POST = withSecurity(withInitialAnalysis('transcript', handler), SECURITY_PRESETS.PAID);
+export const POST = withSecurity(withInitialAnalysis('transcript', handler, { reuse: reuseTranscript }), SECURITY_PRESETS.PAID);

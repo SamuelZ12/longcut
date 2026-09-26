@@ -8,6 +8,7 @@
     "test:limiter-db": "node scripts/test-limiter-db.mjs",
     "test:transcript-spend-db": "node scripts/test-transcript-spend-db.mjs",
     "test:initial-analysis-db": "node scripts/test-initial-analysis-db.mjs",
+    "test:transcript-cache-db": "node scripts/test-transcript-cache-db.mjs",
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",

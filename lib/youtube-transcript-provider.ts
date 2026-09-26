@@ -20,6 +20,16 @@
  * Based on the approach from github.com/JimLiu/baoyu-skills
  */
 
+import { awaitWithSignal } from './promise-utils';
+
+// Cancellation must escape every fallback catch, preserving the leader's reason.
+function rethrowCancellation(error: unknown, signal?: AbortSignal): void {
+  signal?.throwIfAborted();
+  if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+    throw error;
+  }
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 /** Result returned to the transcript route — matches the existing interface */
@@ -121,7 +131,8 @@ interface PageData {
  * Also handles the EU cookie consent page (YouTube shows a consent form
  * instead of the real page if you don't have cookies).
  */
-async function scrapeWatchPage(videoId: string): Promise<PageData> {
+async function scrapeWatchPage(videoId: string, signal?: AbortSignal): Promise<PageData> {
+  signal?.throwIfAborted();
   const url = `https://www.youtube.com/watch?v=${videoId}`;
   const headers: Record<string, string> = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
@@ -130,9 +141,12 @@ async function scrapeWatchPage(videoId: string): Promise<PageData> {
 
   let html: string;
   try {
-    const resp = await fetch(url, { headers, redirect: 'follow' });
-    html = await resp.text();
+    const resp = await awaitWithSignal(fetch(url, { headers, redirect: 'follow', signal }), signal);
+    signal?.throwIfAborted();
+    html = await awaitWithSignal(resp.text(), signal);
+    signal?.throwIfAborted();
   } catch (err) {
+    rethrowCancellation(err, signal);
     throw new TranscriptProviderError('PAGE_FETCH_FAILED', `Failed to fetch YouTube page: ${err}`);
   }
 
@@ -144,15 +158,20 @@ async function scrapeWatchPage(videoId: string): Promise<PageData> {
     if (consentMatch) {
       const consentValue = consentMatch[1];
       try {
-        const resp2 = await fetch(url, {
+        signal?.throwIfAborted();
+        const resp2 = await awaitWithSignal(fetch(url, {
           headers: {
             ...headers,
             'Cookie': `CONSENT=YES+${consentValue}`,
           },
           redirect: 'follow',
-        });
-        html = await resp2.text();
-      } catch {
+          signal,
+        }), signal);
+        signal?.throwIfAborted();
+        html = await awaitWithSignal(resp2.text(), signal);
+        signal?.throwIfAborted();
+      } catch (err) {
+        rethrowCancellation(err, signal);
         // If consent retry fails, continue with the original HTML
       }
     }
@@ -197,8 +216,10 @@ interface CaptionTrack {
 async function fetchInnerTubePlayer(
   videoId: string,
   client: ClientIdentity,
-  pageData: PageData | null
+  pageData: PageData | null,
+  signal?: AbortSignal
 ): Promise<CaptionTrack[]> {
+  signal?.throwIfAborted();
   // Use the client's hardcoded API key, or the one scraped from the page
   const apiKey = client.apiKey || pageData?.apiKey;
   if (!apiKey) {
@@ -235,12 +256,15 @@ async function fetchInnerTubePlayer(
 
   let response: Response;
   try {
-    response = await fetch(endpoint, {
+    response = await awaitWithSignal(fetch(endpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-    });
+      signal,
+    }), signal);
+    signal?.throwIfAborted();
   } catch (err) {
+    rethrowCancellation(err, signal);
     throw new TranscriptProviderError('INNERTUBE_REJECTED', `InnerTube request failed for ${client.name}: ${err}`);
   }
 
@@ -254,8 +278,11 @@ async function fetchInnerTubePlayer(
 
   let data: Record<string, unknown>;
   try {
-    data = await response.json() as Record<string, unknown>;
-  } catch {
+    signal?.throwIfAborted();
+    data = await awaitWithSignal(response.json(), signal) as Record<string, unknown>;
+    signal?.throwIfAborted();
+  } catch (err) {
+    rethrowCancellation(err, signal);
     throw new TranscriptProviderError('INNERTUBE_REJECTED', `Invalid JSON from InnerTube for ${client.name}`);
   }
 
@@ -382,19 +409,23 @@ function parseCaptionXml(xml: string): { text: string; start: number; duration: 
 /**
  * Downloads a caption track from the given URL and parses it.
  */
-async function fetchCaptionTrack(baseUrl: string): Promise<{ text: string; start: number; duration: number }[]> {
+async function fetchCaptionTrack(baseUrl: string, signal?: AbortSignal): Promise<{ text: string; start: number; duration: number }[]> {
+  signal?.throwIfAborted();
   // Ensure we get XML format
   const url = baseUrl.includes('fmt=') ? baseUrl : `${baseUrl}&fmt=3`;
 
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await awaitWithSignal(fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
       },
-    });
+      signal,
+    }), signal);
+    signal?.throwIfAborted();
   } catch (err) {
+    rethrowCancellation(err, signal);
     throw new TranscriptProviderError('CAPTION_FETCH_FAILED', `Failed to download caption track: ${err}`);
   }
 
@@ -402,7 +433,8 @@ async function fetchCaptionTrack(baseUrl: string): Promise<{ text: string; start
     throw new TranscriptProviderError('CAPTION_FETCH_FAILED', `Caption track returned ${response.status}`);
   }
 
-  const xml = await response.text();
+  const xml = await awaitWithSignal(response.text(), signal);
+  signal?.throwIfAborted();
   return parseCaptionXml(xml);
 }
 
@@ -428,9 +460,11 @@ function selectBestTrack(
   const auto = tracks.filter(t => t.kind === 'asr');
 
   // Helper: find a track matching a language code
-  const findByLang = (list: CaptionTrack[], lang: string) =>
-    list.find(t => t.languageCode === lang) ||
-    list.find(t => t.languageCode.startsWith(lang.split('-')[0]));
+  const findByLang = (list: CaptionTrack[], lang: string) => {
+    const normalizedLang = lang.toLowerCase();
+    return list.find(t => t.languageCode.toLowerCase() === normalizedLang) ||
+      list.find(t => t.languageCode.toLowerCase().startsWith(normalizedLang.split('-')[0]));
+  };
 
   // If user requested a specific language, try that first
   if (preferredLang) {
@@ -492,19 +526,23 @@ function shouldTryNextClient(error: TranscriptProviderError): boolean {
  * @param videoId - The 11-character YouTube video ID
  * @param preferredLanguage - Optional language code (e.g., 'en', 'zh', 'ja')
  * @param expectedDuration - Optional expected video duration in seconds
+ * @param signal - Optional leader request signal, including its deadline
  * @returns The transcript segments, language info, and available languages
  */
 export async function fetchYouTubeTranscript(
   videoId: string,
   preferredLanguage?: string,
-  expectedDuration?: number
+  expectedDuration?: number,
+  signal?: AbortSignal
 ): Promise<TranscriptFetchResult | null> {
+  signal?.throwIfAborted();
   // Step 1: Scrape the watch page for InnerTube credentials
   // (needed by the Web client; Android/iOS have hardcoded keys)
   let pageData: PageData | null = null;
   try {
-    pageData = await scrapeWatchPage(videoId);
+    pageData = await scrapeWatchPage(videoId, signal);
   } catch (err) {
+    rethrowCancellation(err, signal);
     // Page scraping failed — we can still try Android/iOS with hardcoded keys
     console.warn('[YT-TRANSCRIPT] Page scraping failed, will try with hardcoded keys:', err);
   }
@@ -513,6 +551,7 @@ export async function fetchYouTubeTranscript(
   let lastError: TranscriptProviderError | null = null;
 
   for (const client of CLIENTS) {
+    signal?.throwIfAborted();
     // Web client needs the scraped page data for its API key
     if (client.clientName === 'WEB' && !pageData?.apiKey) {
       console.log(`[YT-TRANSCRIPT] Skipping ${client.name} client — no page data available`);
@@ -523,7 +562,8 @@ export async function fetchYouTubeTranscript(
 
     try {
       // Step 2a: Get caption tracks from InnerTube
-      const captionTracks = await fetchInnerTubePlayer(videoId, client, pageData);
+      const captionTracks = await fetchInnerTubePlayer(videoId, client, pageData, signal);
+      signal?.throwIfAborted();
 
       console.log(`[YT-TRANSCRIPT] ${client.name} returned ${captionTracks.length} caption tracks:`,
         captionTracks.map(t => `${t.languageCode}${t.kind === 'asr' ? ' (auto)' : ''}`).join(', ')
@@ -539,7 +579,8 @@ export async function fetchYouTubeTranscript(
       console.log(`[YT-TRANSCRIPT] Selected track: ${selectedTrack.languageCode}${selectedTrack.kind === 'asr' ? ' (auto-generated)' : ' (manual)'}`);
 
       // Step 2c: Download and parse the caption track
-      const segments = await fetchCaptionTrack(selectedTrack.baseUrl);
+      const segments = await fetchCaptionTrack(selectedTrack.baseUrl, signal);
+      signal?.throwIfAborted();
 
       if (segments.length === 0) {
         lastError = new TranscriptProviderError('CAPTION_FETCH_FAILED', 'Caption track returned empty');
@@ -558,6 +599,7 @@ export async function fetchYouTubeTranscript(
       };
 
     } catch (err) {
+      rethrowCancellation(err, signal);
       if (err instanceof TranscriptProviderError) {
         lastError = err;
         console.warn(`[YT-TRANSCRIPT] ${client.name} client failed:`, err.code, err.message);
@@ -574,6 +616,7 @@ export async function fetchYouTubeTranscript(
   }
 
   // All clients failed
+  signal?.throwIfAborted();
   if (lastError) {
     console.error(`[YT-TRANSCRIPT] All clients failed for ${videoId}. Last error:`, lastError.code, lastError.message);
   }

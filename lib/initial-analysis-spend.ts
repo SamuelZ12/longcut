@@ -8,6 +8,7 @@ import { setGuestCookies } from '@/lib/guest-usage';
 import { DependencyUnavailableError, dependencyUnavailable, unavailableResponse } from '@/lib/dependency-unavailable';
 import { extractVideoId } from '@/lib/utils';
 import { assertInitialAIAdmission, initialAIContext } from '@/lib/initial-ai-context';
+import { AbortManager, awaitWithSignal } from '@/lib/promise-utils';
 
 type Operation = 'transcript' | 'summary' | 'preview' | 'questions' | 'highlights' | 'themes';
 type Identity = Extract<Awaited<ReturnType<typeof transcriptEligibility>>, { allowed: true }>;
@@ -19,12 +20,17 @@ class IntentError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly resetAt?: string) { super(message); }
 }
 
-async function rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
+async function rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+  const manager = new AbortManager();
   try {
-    const { data, error } = await createServiceRoleClient().rpc(name, args);
+    const combined = signal ? AbortSignal.any([signal, manager.createController('rpc', 5000).signal]) : undefined;
+    combined?.throwIfAborted();
+    const query = createServiceRoleClient().rpc(name, args);
+    const { data, error } = combined ? await awaitWithSignal(query.abortSignal(combined), combined) : await query;
     if (error) throw error;
     return data;
   } catch (error) { throw dependencyUnavailable('initial-analysis-spend', error); }
+  finally { manager.cleanup(); }
 }
 
 export function initialAnalysisErrorResponse(error: unknown): NextResponse | null {
@@ -137,7 +143,10 @@ export function requireInitialAnalysisContext(): void {
 
 /** Protect the complete route invocation, so local error fallbacks cannot hide a failed admission. */
 export function withInitialAnalysis(name: Exclude<Operation, 'themes'>,
-  handler: (request: NextRequest) => Promise<NextResponse>, options: { allowCachedAnalysis?: boolean } = {}) {
+  handler: (request: NextRequest) => Promise<NextResponse>, options: {
+    allowCachedAnalysis?: boolean;
+    reuse?: (request: NextRequest, fresh: (signal?: AbortSignal) => Promise<NextResponse>) => Promise<NextResponse>;
+  } = {}) {
   return async (request: NextRequest): Promise<NextResponse> => {
     try {
       const body = await request.clone().json();
@@ -158,7 +167,15 @@ export function withInitialAnalysis(name: Exclude<Operation, 'themes'>,
         throw new IntentError(409, 'ANALYSIS_INTENT_REQUIRED', 'Choose Analyze video to start generation.');
       }
       const identity = await eligible();
-      return await operation({ id: flowId, videoId, identity }, name, () => handler(request));
+      // Reuse avoids a fresh operation claim, but must still prove capability ownership
+      // before touching shared coordination (a forged flow must not strand a lease).
+      if (options.reuse && await rpc('validate_initial_analysis_flow', { p_flow: flowId,
+        p_video: videoId, p_identifiers: identity.identifiers }, request.signal) !== true) {
+        throw new IntentError(409, 'ANALYSIS_INTENT_REQUIRED', 'This analysis request expired or was already used. Start a new analysis.');
+      }
+      const fresh = (signal?: AbortSignal) => operation({ id: flowId, videoId, identity }, name,
+        () => handler(signal ? new NextRequest(request, { signal }) : request));
+      return options.reuse ? await options.reuse(request, fresh) : await fresh();
     } catch (error) {
       const response = initialAnalysisErrorResponse(error);
       if (response) return response;

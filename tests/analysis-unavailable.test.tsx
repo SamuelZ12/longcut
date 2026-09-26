@@ -23,7 +23,11 @@ vi.mock('@/lib/csrf-client', () => ({ csrfFetch: { post: async (url: string, _bo
   if (state.saveFails) throw new Error('connection refused');
   return Response.json({});
 } } }));
-vi.mock('@/components/right-column-tabs', () => ({ RightColumnTabs: () => <div>Transcript workspace</div> }));
+vi.mock('@/components/right-column-tabs', () => ({ RightColumnTabs: ({ availableLanguages, videoInfo }: any) => <div>
+  Transcript workspace
+  <span data-testid="cached-language">{videoInfo?.language ?? 'unknown'}</span>
+  <span data-testid="cached-languages">{(availableLanguages ?? []).join(',')}</span>
+</div> }));
 vi.mock('@/components/youtube-player', () => ({ YouTubePlayer: () => null }));
 vi.mock('@/components/highlights-panel', () => ({ HighlightsPanel: ({ onGenerateHighlights }: any) => <button onClick={onGenerateHighlights}>Generate highlights</button> }));
 vi.mock('@/components/theme-selector', () => ({ ThemeSelector: ({ onSelect }: any) => <>
@@ -124,6 +128,22 @@ it('cached missing summary stays public and passive until explicitly requested',
   expect(state.paid).not.toHaveBeenCalled();
   fireEvent.click(start);
   await waitFor(() => expect(state.paid.mock.calls).toEqual([['/api/generate-summary']]));
+});
+
+it.each([false, true])('cached visits and reloads reuse language metadata with no transcript request (legacy=%s)', async legacy => {
+  state.cacheStatus = 200;
+  state.cache = cached();
+  if (!legacy) Object.assign(state.cache.videoInfo, { language: 'es', availableLanguages: ['es', 'en'] });
+  for (let visit = 0; visit < 2; visit++) {
+    const view = render(<AnalyzePage />);
+    await screen.findByText('Transcript workspace');
+    expect(screen.getByTestId('cached-language').textContent).toBe(legacy ? 'unknown' : 'es');
+    expect(screen.getByTestId('cached-languages').textContent).toBe(legacy ? '' : 'es,en');
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+    expect(state.requests).not.toContain('/api/transcript');
+    expect(state.paid).not.toHaveBeenCalled();
+    view.unmount();
+  }
 });
 
 it('one-shot server intent from explicit URL submission continues without a second click', async () => {
