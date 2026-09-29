@@ -19,7 +19,7 @@ The project is a Next.js 15 + React 19 application that routes text generation t
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=SamuelZ12/tldw&type=date&legend=top-left)](https://www.star-history.com/#SamuelZ12/tldw&type=date&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=SamuelZ12/tldw&type=date&legend=top-left)](https://star-history.dera.page/#SamuelZ12/tldw&type=date&legend=top-left)
 
 ## Architecture
 
