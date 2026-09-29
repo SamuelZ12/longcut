@@ -166,6 +166,7 @@ export function AIChat({
     return () => manager.cleanup();
   }, [videoId]);
   const isComposingRef = useRef(false);
+  const compositionTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     const viewport = scrollViewportRef.current;
@@ -1010,7 +1011,7 @@ export function AIChat({
   }, [isLoading, sendMessage, followUpQuestions]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey && !isComposingRef.current) {
+    if (e.key === "Enter" && !e.shiftKey && !isComposingRef.current && !e.nativeEvent.isComposing) {
       e.preventDefault();
       sendMessage();
     }
@@ -1192,10 +1193,18 @@ export function AIChat({
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               onCompositionStart={() => {
+                clearTimeout(compositionTimeoutRef.current);
                 isComposingRef.current = true;
               }}
               onCompositionEnd={() => {
-                isComposingRef.current = false;
+                // Delay resetting the flag so the keydown handler for the
+                // same Enter keystroke still sees isComposing as true.
+                // In some browsers (e.g. Chrome with Chinese IME),
+                // compositionend fires before keydown for the Enter key
+                // that confirms the composition.
+                compositionTimeoutRef.current = setTimeout(() => {
+                  isComposingRef.current = false;
+                }, 0);
               }}
               placeholder="Ask about the video..."
               className="resize-none rounded-[20px] text-xs bg-neutral-100 border-[#ebecee] pr-11"
