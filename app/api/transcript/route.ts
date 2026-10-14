@@ -38,6 +38,25 @@ function calculateTranscriptDuration(segments: { start: number; duration: number
   return lastSegment.start + lastSegment.duration;
 }
 
+// Shared failure-response shape for any native-caption vendor's non-success outcome.
+function vendorFailureResponse(
+  respond: (payload: Record<string, unknown>, status: number) => NextResponse,
+  result: { outcome: 'unavailable' | 'dependency_failure' | 'unknown_upstream_acceptance'; reason: string },
+  source: string
+) {
+  const error = result.outcome === 'unavailable'
+    ? 'No existing captions are available for this video.'
+    : result.reason === 'unexpected_job'
+      ? 'The transcript provider unexpectedly accepted background work. No transcript is available; Longcut will not automatically resubmit this request.'
+      : result.outcome === 'unknown_upstream_acceptance'
+        ? 'The transcript request did not complete. The provider may have accepted work; Longcut will not automatically resubmit this request.'
+        : 'The transcript provider could not return usable captions.';
+  return respond({
+    error, code: `TRANSCRIPT_${result.outcome.toUpperCase()}`, outcome: result.outcome,
+    reason: result.reason, source, retryable: false,
+  }, result.outcome === 'unavailable' ? 404 : result.reason === 'timeout' ? 504 : 502);
+}
+
 async function handler(request: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
@@ -169,13 +188,15 @@ async function handler(request: NextRequest) {
           availableLanguages = result.availableLanguages;
         } else if (result.outcome === 'unavailable') {
           // Confirmed absence of captions: do not pay Supadata for the same video.
-          return respond({
-            error: 'No existing captions are available for this video.',
-            code: `TRANSCRIPT_${result.outcome.toUpperCase()}`, outcome: result.outcome,
-            reason: result.reason, source, retryable: false,
-          }, 404);
+          return vendorFailureResponse(respond, result, source);
+        } else if (result.outcome === 'unknown_upstream_acceptance') {
+          // The 'uncertain' transition above already set blocked_until on this request_key
+          // (supadataNativeCacheIdentity), so a subsequent Supadata reserve would always
+          // observe 'cooldown' and 429 the user rather than actually retrying. Return the
+          // same outcome Supadata itself returns for its own unknown_upstream_acceptance.
+          return vendorFailureResponse(respond, result, source);
         }
-        // dependency_failure / unknown_upstream_acceptance fall through to Supadata below.
+        // Only dependency_failure falls through to Supadata below (spends a second unit).
       }
     }
 
@@ -207,17 +228,7 @@ async function handler(request: NextRequest) {
         await transitionTranscriptSpend(admission.reservationId,
           result.outcome === 'unknown_upstream_acceptance' ? 'uncertain' : 'complete');
         if (result.outcome !== 'success') {
-          const error = result.outcome === 'unavailable'
-            ? 'No existing captions are available for this video.'
-            : result.reason === 'unexpected_job'
-              ? 'The transcript provider unexpectedly accepted background work. No transcript is available; Longcut will not automatically resubmit this request.'
-              : result.outcome === 'unknown_upstream_acceptance'
-                ? 'The transcript request did not complete. The provider may have accepted work; Longcut will not automatically resubmit this request.'
-                : 'The transcript provider could not return usable captions.';
-          return respond({
-            error, code: `TRANSCRIPT_${result.outcome.toUpperCase()}`, outcome: result.outcome,
-            reason: result.reason, source, retryable: false,
-          }, result.outcome === 'unavailable' ? 404 : result.reason === 'timeout' ? 504 : 502);
+          return vendorFailureResponse(respond, result, source);
         }
         rawSegments = result.segments;
         language = result.language;

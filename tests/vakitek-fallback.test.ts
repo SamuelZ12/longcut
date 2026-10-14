@@ -14,6 +14,7 @@ vi.mock('@/lib/transcript-spend', () => ({
   transitionTranscriptSpend: async () => {},
 }));
 import { POST } from '@/app/api/transcript/route';
+import { VAKITEK_TIMEOUT_MS } from '@/lib/vakitek-transcript-provider';
 
 const upstream = vi.fn();
 const request = () => new NextRequest('http://localhost/api/transcript', {
@@ -65,6 +66,20 @@ it('falls through to Supadata when Vakitek reports a dependency failure', async 
   expect(upstream).toHaveBeenCalledTimes(2);
   expect(host(upstream.mock.calls[0])).toBe('api.vakitek.co.uk');
   expect(host(upstream.mock.calls[1])).toBe('api.supadata.ai');
+});
+
+it('does not call Supadata after a Vakitek timeout, returning the shared unknown_upstream_acceptance response', async () => {
+  vi.useFakeTimers();
+  upstream.mockImplementation((url: string) =>
+    new URL(url).host === 'api.vakitek.co.uk' ? new Promise(() => {}) : Promise.resolve(supadataSuccess()));
+  const pending = POST(request());
+  await vi.advanceTimersByTimeAsync(VAKITEK_TIMEOUT_MS);
+  const response = await pending;
+  expect(response.status).toBe(504);
+  expect(await response.json()).toMatchObject({ outcome: 'unknown_upstream_acceptance', source: 'vakitek', reason: 'timeout',
+    error: 'The transcript request did not complete. The provider may have accepted work; Longcut will not automatically resubmit this request.' });
+  expect(upstream).toHaveBeenCalledTimes(1);
+  expect(host(upstream.mock.calls[0])).toBe('api.vakitek.co.uk');
 });
 
 it('leaves behavior unchanged when VAKITEK_API_KEY is not configured', async () => {
