@@ -6,6 +6,7 @@ import { shouldUseMockData, getMockTranscript } from '@/lib/mock-data';
 import { mergeTranscriptSegmentsIntoSentences } from '@/lib/transcript-sentence-merger';
 import { NO_CREDITS_USED_MESSAGE } from '@/lib/no-credits-message';
 import { fetchYouTubeTranscript } from '@/lib/youtube-transcript-provider';
+import { fetchVakitekTranscript } from '@/lib/vakitek-transcript-provider';
 import { fetchSupadataTranscript } from '@/lib/supadata-transcript-provider';
 import { transcriptEligibility, reserveTranscriptSpend, transitionTranscriptSpend } from '@/lib/transcript-spend';
 import { setGuestCookies } from '@/lib/guest-usage';
@@ -109,15 +110,15 @@ async function handler(request: NextRequest) {
       }, eligibility.requiresAuth ? 401 : 403);
     }
 
-    // ── Strategy: Try YouTube direct first (free), fall back to Supadata (paid) ──
+    // ── Strategy: Try YouTube direct first (free), then Vakitek, then Supadata (both paid) ──
     // YouTube's InnerTube API is free but gets blocked from datacenter IPs.
-    // Supadata is a paid API that handles YouTube's bot detection for us.
-    // By trying free first, we only pay for Supadata when YouTube blocks us.
+    // Vakitek and Supadata are paid APIs that handle YouTube's bot detection for us.
+    // By trying free first, we only pay a vendor when YouTube blocks us.
 
     let rawSegments: { text: string; start: number; duration: number }[] | null = null;
     let language: string | undefined;
     let availableLanguages: string[] | undefined;
-    let source: 'youtube-direct' | 'supadata' = 'youtube-direct';
+    let source: 'youtube-direct' | 'vakitek' | 'supadata' = 'youtube-direct';
 
     // ── Attempt 1: YouTube InnerTube API (free) ──
     console.log(`[TRANSCRIPT] Trying YouTube direct for ${videoId} (lang=${lang ?? 'auto'})`);
@@ -135,7 +136,50 @@ async function handler(request: NextRequest) {
       console.warn(`[TRANSCRIPT] YouTube direct failed:`, ytError instanceof Error ? ytError.message : String(ytError));
     }
 
-    // ── Attempt 2: Supadata API (paid fallback) ──
+    // ── Attempt 2: Vakitek API (paid fallback, native captions only) ──
+    if (!rawSegments || rawSegments.length === 0) {
+      const vakitekKey = process.env.VAKITEK_API_KEY;
+      if (vakitekKey) {
+        source = 'vakitek';
+        await assertTranscriptCacheOwner();
+        const admission = await reserveTranscriptSpend(eligibility, videoId, lang);
+        if (!admission.allowed) {
+          if (admission.reason === 'guest_used') return respond({ code: 'TRANSCRIPT_ELIGIBILITY_REQUIRED',
+            requiresAuth: true, error: 'Sign in to request another fresh transcript.' }, 401);
+          const retryAfter = Math.max(1, Math.ceil((Date.parse(admission.resetAt) - Date.now()) / 1000));
+          return respond({ code: 'TRANSCRIPT_SPEND_THROTTLED', reason: admission.reason,
+            error: admission.reason === 'cooldown' ? 'A transcript request may still be processing. Please wait before retrying.'
+              : 'Fresh transcript requests are temporarily limited. Cached videos remain available.',
+            resetAt: admission.resetAt, retryAfter, retryable: true,
+          }, 429);
+        }
+        if (request.signal.aborted) {
+          await transitionTranscriptSpend(admission.reservationId, 'release');
+          return respond({ code: 'TRANSCRIPT_DEPENDENCY_FAILURE', error: 'Transcript request cancelled before dispatch.' }, 503);
+        }
+        // Commit possible dispatch BEFORE invoking the provider. No refund after this boundary.
+        await assertTranscriptCacheOwner(true);
+        await transitionTranscriptSpend(admission.reservationId, 'dispatch');
+        const result = await fetchVakitekTranscript({ videoId, lang, apiKey: vakitekKey, requestId, signal: request.signal });
+        await transitionTranscriptSpend(admission.reservationId,
+          result.outcome === 'unknown_upstream_acceptance' ? 'uncertain' : 'complete');
+        if (result.outcome === 'success') {
+          rawSegments = result.segments;
+          language = result.language;
+          availableLanguages = result.availableLanguages;
+        } else if (result.outcome === 'unavailable') {
+          // Confirmed absence of captions: do not pay Supadata for the same video.
+          return respond({
+            error: 'No existing captions are available for this video.',
+            code: `TRANSCRIPT_${result.outcome.toUpperCase()}`, outcome: result.outcome,
+            reason: result.reason, source, retryable: false,
+          }, 404);
+        }
+        // dependency_failure / unknown_upstream_acceptance fall through to Supadata below.
+      }
+    }
+
+    // ── Attempt 3: Supadata API (paid fallback) ──
     if (!rawSegments || rawSegments.length === 0) {
       const supadataKey = process.env.SUPADATA_API_KEY;
       if (supadataKey) {
