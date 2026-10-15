@@ -48,6 +48,7 @@ describe.skipIf(!localCluster)('actual transcript route + PostgreSQL spend RPCs 
     vi.clearAllMocks();
     Object.assign(state, { user: { id: 'one' }, tier: 'free', topup: 0, eligible: true, unlimited: false });
     vi.stubEnv('SUPADATA_SPEND_POLICY', 'native-v1'); vi.stubEnv('SUPADATA_API_KEY', 'mock');
+    vi.stubEnv('VAKITEK_API_KEY', '');
     state.direct.mockResolvedValue(null);
     state.upstream.mockImplementation(async () => Response.json({ content: [{ text: 'Caption.', offset: 0, duration: 1000 }] }));
     vi.stubGlobal('fetch', state.upstream);
