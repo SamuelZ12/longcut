@@ -15,6 +15,7 @@
     "lint": "eslint .",
     "validate-env": "tsx scripts/validate-env.ts",
     "stripe:smoke": "node scripts/stripe-smoke.mjs",
+    "vakitek:smoke": "node scripts/vakitek-smoke.mjs",
     "stripe:setup-portal": "tsx scripts/setup-stripe-portal.ts",
     "stripe:create-prices": "tsx scripts/create-new-prices.ts"
   },

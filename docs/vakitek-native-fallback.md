@@ -1,5 +1,12 @@
 # Vakitek native-caption fallback
 
+## Try it in 2 minutes
+
+1. Set `VAKITEK_API_KEY` in `.env.local` (or export it in your shell).
+2. Run `npm run vakitek:smoke`. It calls the Vakitek API directly (no server needed) for a known-good video, a known-foreign-language video, an unknown video id, and the known-good video with `target_language=fr`, and prints a PASS/FAIL line per case plus a summary. It never prints the key.
+3. To see the fallback run inside the app, you need `/api/transcript` to skip the free YouTube-direct attempt first, since that is tried before Vakitek. Either run the dev server somewhere YouTube's direct API is already blocked, or temporarily point `AbortManager`/network access away from YouTube so the direct attempt fails, then analyze a video on the analyze page. Watch the server log for a line like `[TRANSCRIPT] Using vakitek result:` (or `[TRANSCRIPT] Processed transcript:` with `source: "vakitek"` in the printed object).
+4. To disable the fallback again, unset `VAKITEK_API_KEY`. With it unset, the Vakitek attempt in `app/api/transcript/route.ts` is skipped entirely and the existing YouTube-direct/Supadata behavior is unchanged.
+
 Verified against the [Vakitek transcript API](https://api.vakitek.co.uk) on **2026-10-13**.
 
 Tried after YouTube direct and before Supadata when `VAKITEK_API_KEY` is set: `GET /v1/youtube/transcript?video=<id>&format=json[&target_language=<lang>]`,
