@@ -85,6 +85,7 @@ describe.skipIf(!local)('real transcript route + cache/spend RPCs on independent
     const realNow = Date.now.bind(Date);
     vi.spyOn(Date, 'now').mockImplementation(() => realNow() + state.clockOffset);
     vi.stubEnv('SUPADATA_API_KEY', 'mock'); vi.stubEnv('SUPADATA_SPEND_POLICY', 'native-v1');
+    vi.stubEnv('VAKITEK_API_KEY', '');
     state.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
       if (!signatures[name]) throw new Error(`Unexpected RPC ${name}`);
       if (name === state.failRpc) return { data: null, error: { code: 'LOCAL_FAILURE' } };

@@ -25,6 +25,7 @@ beforeEach(() => {
   direct.mockResolvedValue(null);
   vi.stubGlobal('fetch', upstream);
   vi.stubEnv('SUPADATA_API_KEY', 'mock-secret');
+  vi.stubEnv('VAKITEK_API_KEY', '');
   vi.spyOn(console, 'info').mockImplementation(() => {});
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});

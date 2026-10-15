@@ -117,6 +117,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', state.upstream);
   vi.stubEnv('SUPADATA_API_KEY', 'local-mock-key');
   vi.stubEnv('SUPADATA_SPEND_POLICY', 'native-v1');
+  vi.stubEnv('VAKITEK_API_KEY', '');
 });
 
 describe('cache and public-page classification', () => {

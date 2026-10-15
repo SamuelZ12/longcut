@@ -103,6 +103,7 @@ describe.skipIf(!local)('initial-analysis actual PostgreSQL admission and mocked
     Object.assign(state, { user: { id: 'one' }, eligible: true, tier: 'free', topup: 0, unlimited: false, used: false, cache: null,
       failRpc: '', authError: null, loseAck: false, cacheReads: 0, vanishCache: false });
     vi.stubEnv('AI_PROVIDER', 'minimax'); vi.stubEnv('MINIMAX_API_KEY', 'mock'); vi.stubEnv('SUPADATA_API_KEY', 'mock'); vi.stubEnv('SUPADATA_SPEND_POLICY', 'native-v1');
+    vi.stubEnv('VAKITEK_API_KEY', '');
     state.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
       if (name === state.failRpc) return { error: { code: 'LOCAL_FAILURE' }, data: null };
       if (!signatures[name]) throw new Error(`Unexpected RPC ${name}`);

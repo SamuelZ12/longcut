@@ -41,6 +41,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', state.upstream);
   vi.stubEnv('SUPADATA_API_KEY', 'mock');
   vi.stubEnv('SUPADATA_SPEND_POLICY', 'native-v1');
+  vi.stubEnv('VAKITEK_API_KEY', '');
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
