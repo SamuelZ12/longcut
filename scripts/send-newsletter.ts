@@ -1,5 +1,5 @@
 import * as dotenv from 'dotenv';
-import * as postmark from 'postmark';
+import { sendEmail } from '../lib/email/send';
 import { createServiceRoleClient } from '../lib/supabase/admin';
 import { getHtmlBody, getSubject } from '../lib/email/templates/monthly-update';
 
@@ -7,11 +7,10 @@ import { getHtmlBody, getSubject } from '../lib/email/templates/monthly-update';
 dotenv.config({ path: '.env.local' });
 
 // Check for required environment variables
-const POSTMARK_SERVER_TOKEN = process.env.POSTMARK_SERVER_TOKEN;
 const NEXT_PUBLIC_APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://longcut.ai';
 
-if (!POSTMARK_SERVER_TOKEN) {
-  console.error('Error: POSTMARK_SERVER_TOKEN is not set.');
+if (!process.env.RESEND_API_KEY) {
+  console.error('Error: RESEND_API_KEY is not set.');
   process.exit(1);
 }
 
@@ -20,7 +19,6 @@ if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
   process.exit(1);
 }
 
-const client = new postmark.ServerClient(POSTMARK_SERVER_TOKEN);
 const supabase = createServiceRoleClient();
 
 interface Profile {
@@ -84,13 +82,7 @@ async function sendNewsletter() {
     const subject = getSubject();
 
     try {
-      await client.sendEmail({
-        "From": "zara@longcut.ai",
-        "To": profile.email,
-        "Subject": subject,
-        "HtmlBody": htmlBody,
-        "MessageStream": "broadcast"  // Fixed: Use broadcast stream for newsletters
-      });
+      await sendEmail({ to: profile.email, subject, html: htmlBody });
       console.log(`[OK] Sent to ${profile.email}`);
       successCount++;
     } catch (e: any) {
@@ -98,9 +90,8 @@ async function sendNewsletter() {
       errorCount++;
     }
 
-    // Optional: Add a small delay to avoid hitting rate limits too hard if the list is huge?
-    // Postmark handles high volume well, but for a script loop, a tiny tick doesn't hurt.
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // Resend allows 10 requests per second.
+    await new Promise(resolve => setTimeout(resolve, 120));
   }
 
   console.log('-----------------------------------');
