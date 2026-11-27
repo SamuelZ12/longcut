@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as postmark from 'postmark';
-import { LinkTrackingOptions } from 'postmark/dist/client/models/message/SupportingTypes';
 import { createServiceRoleClient } from '@/lib/supabase/admin';
+import { sendEmail } from '@/lib/email/send';
 import { getWelcomeSubject, getWelcomeHtmlBody } from '@/lib/email/templates/welcome';
 import { z } from 'zod';
 
@@ -36,16 +35,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: 'Unauthorized' },
       { status: 401 }
-    );
-  }
-
-  // Validate Postmark configuration
-  const postmarkToken = process.env.POSTMARK_SERVER_TOKEN;
-  if (!postmarkToken) {
-    console.error('POSTMARK_SERVER_TOKEN not configured');
-    return NextResponse.json(
-      { error: 'Email service not configured' },
-      { status: 500 }
     );
   }
 
@@ -92,24 +81,17 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Initialize Postmark client and send email
-    const client = new postmark.ServerClient(postmarkToken);
-
-    const result = await client.sendEmail({
-      From: 'zara@longcut.ai',
-      To: email,
-      Subject: getWelcomeSubject(),
-      HtmlBody: getWelcomeHtmlBody(fullName),
-      MessageStream: 'outbound', // Transactional email stream
-      TrackOpens: true,
-      TrackLinks: LinkTrackingOptions.HtmlAndText,
+    const result = await sendEmail({
+      to: email,
+      subject: getWelcomeSubject(),
+      html: getWelcomeHtmlBody(fullName),
     });
 
-    console.log(`Welcome email sent to ${email} (MessageID: ${result.MessageID})`);
+    console.log(`Welcome email sent to ${email} (MessageID: ${result.id})`);
 
     return NextResponse.json({
       success: true,
-      messageId: result.MessageID,
+      messageId: result.id,
     });
 
   } catch (error) {
