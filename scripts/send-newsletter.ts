@@ -2,6 +2,7 @@ import * as dotenv from 'dotenv';
 import { sendEmail } from '../lib/email/send';
 import { createServiceRoleClient } from '../lib/supabase/admin';
 import { getHtmlBody, getSubject } from '../lib/email/templates/monthly-update';
+import { generateUnsubscribeToken } from '../lib/newsletter-security';
 
 // Load environment variables from .env.local
 dotenv.config({ path: '.env.local' });
@@ -77,7 +78,8 @@ async function sendNewsletter() {
   for (const profile of profiles) {
     if (!profile.email) continue;
 
-    const unsubscribeUrl = `${NEXT_PUBLIC_APP_URL}/unsubscribe?uid=${profile.id}`;
+    const token = generateUnsubscribeToken(profile.id);
+    const unsubscribeUrl = `${NEXT_PUBLIC_APP_URL}/unsubscribe?uid=${profile.id}&token=${token}`;
     const htmlBody = getHtmlBody(unsubscribeUrl);
     const subject = getSubject();
 
